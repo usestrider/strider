@@ -100,9 +100,13 @@ export const Pattern = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url
  *   `ws://localhost:8080/`, and `"HTTP://Example.com:80"` matches `http://example.com/`. A string that isn't an
  *   absolute URL is compared as it is.
  *
- * Given to a page or a context whose `baseURL` is set, a pattern that doesn't start with `*` or a scheme resolves
- * against the base first, its `*`, `**`, and `:name` parts kept: with a base of `http://localhost:3000/`, `"/api/**"`
- * is the glob `"http://localhost:3000/api/**"`, and `"/products/:id"` a `URLPattern`.
+ * Given to a page or a context whose `baseURL` is set, a pattern that doesn't start with `*` or a scheme is joined to
+ * the part of the base it replaces: `"//host/…"` takes the base's scheme, `"/…"` its scheme and host, `"?…"` the
+ * base without its query, `"#…"` the base without its fragment, and any other the base's path up to its last `/`.
+ * The `.` and `..` segments of its path are then removed. The pattern's own text is kept as written, so its `*`,
+ * `**`, and `:name` parts mean what they did: with a base of `http://localhost:3000/`, `"/api/**"` is the glob
+ * `"http://localhost:3000/api/**"`, and `"/products/:id"` a `URLPattern`. A host after `//` is written as a URL
+ * writes it, in lower case, unless it holds `*` or another pattern character.
  *
  * An invalid pattern fails with `InvalidInput` at once.
  *

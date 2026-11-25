@@ -215,9 +215,12 @@ const localCart = Effect.fn("localCart")(function*() {
 }, Effect.scoped)
 ```
 
-A path from `/` replaces the base's path, and one without a leading `/` replaces its last segment. A pattern keeps
-its `*`, `**`, and `:name` parts, and a WebSocket route's takes `ws:` for the base's `http:` and `wss:` for
-`https:`. A pattern that starts with `*` or a scheme is used as given. The base is set when the context is created,
+For `goto`, a path from `/` replaces the base's path, and one without a leading `/` replaces its last segment. A
+pattern is joined to the base the same way: `"//host/…"` takes the base's scheme, `"/…"` its scheme and host,
+`"?…"` and `"#…"` replace its query or fragment, and any other its last segment, with `.` and `..` segments
+removed. The pattern's own text is kept as written, so its `*`, `**`, and `:name` parts still match as they would in
+a full URL. A WebSocket route's pattern takes `ws:` for the base's `http:` and `wss:` for `https:`. A pattern that
+starts with `*` or a scheme is used as given. The base is set when the context is created,
 by `newContext`, `newPage`, or a launch's [`defaultContext`](#configuring-the-default-context-at-launch). A base that
 isn't an absolute URL fails with `InvalidInput`; without one, a relative `goto` fails with `InvalidInput` too.
 

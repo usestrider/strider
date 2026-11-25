@@ -1923,9 +1923,14 @@ Playwright's deprecated `fontSize` option is not built; `style.title` sets the t
 
 `UserContext.Options.baseURL` is the one base a context's relative input resolves against, with no default. `goto`
 on a page or a frame uses an absolute URL as given and resolves any other as a link at the base would (WHATWG: `/a`
-replaces the path, `a` its last segment). A URL pattern that starts with `*` or a scheme is used as given; any other
-resolves against the base with its `*`, `**`, and `URLPattern` syntax kept, and is then read as a glob, a
-`URLPattern`, or an exact URL as before. A WebSocket route's pattern resolves against the base with `http:` made
+replaces the path, `a` its last segment). A URL pattern that starts with `*` or a scheme is used as given; any other is
+joined as text to the part of the base it replaces (`//host…` the base's scheme, `/…` its scheme and host, `?…` the
+base without its query, `#…` without its fragment, anything else its path up to the last `/`), its path's `.` and
+`..` segments are removed (RFC 3986, 5.2.4), and it is then read as a glob, a `URLPattern`, or an exact URL as
+before. Only a host free of pattern syntax goes through the URL parser, to be lowercased and decoded; the rest of the
+pattern's text is kept as written, as an absolute pattern's is. Resolving the pattern with the URL parser, its syntax
+set aside under placeholders, was rejected: the parser can make placeholder text out of a literal host, by
+lowercasing, percent-decoding, or mapping full-width characters, and that text would come back as a wildcard. A WebSocket route's pattern resolves against the base with `http:` made
 `ws:` and `https:` made `wss:`. The rules live in one internal function that `goto`, routes, WebSocket routes, HAR
 recording's `url`, the toolkit, and every event filter call, so no operation resolves differently. This follows
 Playwright's rules except that a pattern with a scheme is never resolved, so an absolute pattern always means what it
