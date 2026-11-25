@@ -51,6 +51,7 @@ Each layer uses only the one below it. L2 never sees protocol ids; L1 never sees
 | Discovered page or the default context | observe; upgrade with `inspect` or `control` (scoped) | leave open | none; the access upgrade is released with its `Scope` |
 | Popup of a leave-open page | observe | leave open | none |
 
+- **Only `close` ends an attached browser.** Closing an attached browser's layer disconnects from it and leaves it running for its other clients. `browser.close` ends the browser itself, for every client, whether the layer launched it or connected to it (CDP's `Browser.close`, BiDi's `browser.close`); stock WebKit has no command for it, so there it fails with `Unsupported`. `browser.closed` says why the connection ended, and `browser.isConnected` whether it still lives.
 - **Access is typed.** `ObservedPage` exposes state and events only. `ReadonlyPage` adds isolated-world reads, locators, snapshots, and screenshots. `Page` adds input, navigation, main-world evaluation, and declarations. Calling a control method on an inspected page is a compile error.
 - **Wider effects need wider access.** A declaration whose physical effect is wider than its target, such as a browser-global intercept on BiDi, needs explicit wider access. Without it the call fails with `NotPermitted`.
 

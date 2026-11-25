@@ -435,10 +435,10 @@ export const connect: (
       closing: Kit.closing(state),
       closeBrowser: () =>
         Kit.closeBrowser(
-        state,
-        BidiBrowser.close().pipe(on),
-        options.ownership === "launched" && options.exited !== undefined ? options.exited : client.closed
-      ),
+          state,
+          BidiBrowser.close().pipe(on),
+          options.ownership === "launched" && options.exited !== undefined ? options.exited : client.closed
+        ),
       // Its `historyUpdated` is also what a `history.pushState` to the same URL sends
       reportsDocumentOpen: false,
       defaultContext: state.defaultContext,

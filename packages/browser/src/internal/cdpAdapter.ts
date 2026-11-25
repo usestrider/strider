@@ -395,10 +395,10 @@ export const connect: (
       closing: Kit.closing(state),
       closeBrowser: () =>
         Kit.closeBrowser(
-        state,
-        BrowserCdp.close().pipe(Protocol.on(client.root)),
-        options.ownership === "launched" && options.exited !== undefined ? options.exited : client.closed
-      ),
+          state,
+          BrowserCdp.close().pipe(Protocol.on(client.root)),
+          options.ownership === "launched" && options.exited !== undefined ? options.exited : client.closed
+        ),
       // `Page.documentOpened`
       reportsDocumentOpen: true,
       defaultContext: state.defaultContext,

@@ -8,6 +8,8 @@ import { connectionState, firefoxStartable } from "./connectionState.ts"
 
 connectionState(
   "Firefox",
-  Firefox.layer({ executablePath: firefox.executable }).pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor))),
+  Firefox.layer({ executablePath: firefox.executable }).pipe(
+    Layer.provide(Layer.mergeAll(NodeServices.layer, NodeSocket.layerWebSocketConstructor))
+  ),
   firefoxStartable((endpoint) => Firefox.layerConnect(endpoint))
 )

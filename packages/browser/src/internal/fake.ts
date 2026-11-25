@@ -354,8 +354,11 @@ export const connect = (
       closed: Deferred.await(ended),
       closeBrowser: () =>
         Effect.asVoid(
-        Deferred.succeed(ended, new Transport.ConnectionLost({ initiator: "local", description: "The browser closed" }))
-      ),
+          Deferred.succeed(
+            ended,
+            new Transport.ConnectionLost({ initiator: "local", description: "The browser closed" })
+          )
+        ),
       createUserContext: Effect.fnUntraced(function*() {
         const context = ids.userContext()
         contexts.add(context)

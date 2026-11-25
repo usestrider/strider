@@ -1317,6 +1317,19 @@ teardown was rejected because the reproduced normal shutdown lost a recent write
 wait could hang scope closure, and a caller-configurable budget would add public configuration for a bounded
 internal cleanup policy. Attached browsers and failed connections retain their existing release behavior.
 
+## Only an explicit close ends an attached browser
+
+Closing the scope of a layer that connected to a running browser disconnects from it and never closes it, while
+`browser.close` ends the browser for every client, attached or launched: CDP's Browser.close, BiDi's browser.close,
+then a wait for a launched browser's exit, or else the connection's end. On a launched browser it is the layer's own
+graceful close run early, so the release then has nothing left to do. An attached browser is often someone else's,
+such as a developer's Chrome or a shared remote browser, so ending it as a side effect of a scope closing would
+surprise its other clients; closing it is an action the program asks for. Closing attached browsers on release was
+rejected for that reason, and a `close` that only disconnects an attached browser, as Playwright's does for
+`connectOverCDP`, was rejected because disconnecting is already what the scope does. Stock WebKit's inspector and
+Automation protocols have no command that ends the browser, so its capability table lists `browser.close` as
+unsupported rather than `close` doing nothing there.
+
 ## Chromium screencast ownership belongs to the session
 
 CDP's parameterless Page.stopScreencast stops the session's stream, not one acquisition. Pinned Chromium

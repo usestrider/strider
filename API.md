@@ -268,6 +268,9 @@ interface Browser {
   readonly pages: Watchable.Watchable<ReadonlyArray<Page.ObservedPage>>   // attach mode: what exists, and changes
   readonly defaultContext: UserContext.ObservedUserContext   // fixed: exists for the whole connection
   readonly contexts: Watchable.Watchable<ReadonlyArray<UserContext.ObservedUserContext>>   // default first, then in the order added
+  readonly closed: Effect<Target.CloseReason>             // waits while the connection lives: BrowserClosed or ConnectionLost
+  readonly isConnected: Effect<boolean>                  // false once closed has completed
+  readonly close: Effect<void, BrowserError | Timeout>   // ends the browser for every client, launched or attached; Unsupported on stock WebKit
 }
 declare const Browser: Context.Service<Browser, Browser>  // provided by a backend layer (Chromium.layer(options), …)
 declare const newPage: (options?: UserContext.Options | undefined) => Effect<Page.Page, Page.PageError, Browser | Scope>
