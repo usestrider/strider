@@ -281,3 +281,75 @@ describe("HTTPS proxy tunnels, untrusted", () => {
     }
   })
 })
+
+describe("discovery redirect boundaries", () => {
+  it.live("reselects the proxy after a redirect from a NO_PROXY host", () =>
+    Effect.gen(function*() {
+      const proxy = yield* serve(version("ws://browser.test/devtools/browser/proxied"))
+      const direct = yield* serve((_request, response) => {
+        response.writeHead(302, { location: "http://browser.test:9222/json/version" })
+        response.end()
+      })
+      const result = yield* resolve(`http://127.0.0.1:${direct.port}`, {
+        HTTP_PROXY: `http://127.0.0.1:${proxy.port}`,
+        NO_PROXY: "127.0.0.1"
+      })
+      assert.strictEqual(result, "ws://browser.test/devtools/browser/proxied")
+      assert.strictEqual(proxy.seen.length, 1)
+    }).pipe(Effect.scoped))
+
+  it.live("removes credentials when a proxied redirect changes origin", () =>
+    Effect.gen(function*() {
+      const credentials: Array<string | undefined> = []
+      const proxy = yield* serve((request, response) => {
+        credentials.push(request.headers.authorization)
+        if (request.headers.host === "browser.test:9222") {
+          response.writeHead(302, { location: "http://other.test:9222/json/version" })
+          response.end()
+        } else {
+          version("ws://other.test/devtools/browser/redirected")(request, response)
+        }
+      })
+      yield* Connect.chromiumWebSocket("http://browser.test:9222", {
+        headers: { authorization: "Bearer test-credential" }
+      }).pipe(
+        Effect.provide(ProxyHttpClient.layer),
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
+          env: {
+            HTTP_PROXY: `http://127.0.0.1:${proxy.port}`
+          }
+        })))
+      )
+      assert.deepStrictEqual(credentials, ["Bearer test-credential", undefined])
+    }).pipe(Effect.scoped))
+
+  it.live("follows a redirect without waiting for its body to end", () =>
+    Effect.gen(function*() {
+      const proxy = yield* serve((request, response) => {
+        if (request.url?.endsWith("/json/version")) {
+          response.writeHead(302, { location: "http://browser.test:9222/version" })
+          response.flushHeaders()
+        } else {
+          version("ws://browser.test/devtools/browser/redirected")(request, response)
+        }
+      })
+      const result = yield* resolve("http://browser.test:9222", {
+        HTTP_PROXY: `http://127.0.0.1:${proxy.port}`
+      }).pipe(Effect.timeoutOption("1 second"))
+      assert.deepStrictEqual(result, Option.some("ws://browser.test/devtools/browser/redirected"))
+    }).pipe(Effect.scoped))
+})
+
+describe("invalid discovery redirects", () => {
+  it.live("reports an invalid redirect URL as ConnectionFailed", () =>
+    Effect.gen(function*() {
+      const proxy = yield* serve((_request, response) => {
+        response.writeHead(302, { location: "http://[" })
+        response.end()
+      })
+      const exit = yield* Effect.exit(resolve("http://browser.test:9222", {
+        HTTP_PROXY: `http://127.0.0.1:${proxy.port}`
+      }))
+      assert.strictEqual(reasonOf(exit)?._tag, "ConnectionFailed")
+    }).pipe(Effect.scoped))
+})

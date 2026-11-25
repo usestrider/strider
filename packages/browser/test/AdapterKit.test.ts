@@ -11,17 +11,22 @@ import * as Effect from "effect/Effect"
 import * as Base64 from "effect/encoding/Base64"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
 import * as Scope from "effect/Scope"
+import * as TestClock from "effect/testing/TestClock"
 import { vi } from "vitest"
+import * as CdpBrowser from "../src/cdp/Browser.ts"
 import * as Network from "../src/cdp/Network.ts"
 import * as Page from "../src/cdp/Page.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as Kit from "../src/internal/adapterKit.ts"
+import * as CdpWire from "../src/internal/cdpWire.ts"
 import * as Declarations from "../src/internal/declarations.ts"
 import * as Operation from "../src/internal/operation.ts"
-import type * as ProtocolClient from "../src/internal/protocolClient.ts"
+import * as ProtocolClient from "../src/internal/protocolClient.ts"
 import * as Target from "../src/Target.ts"
+import { makeBrowser } from "./utils/FakeBrowser.ts"
 
 /** A client's control whose `run` runs `before` first, as events received ahead of it would be folded. */
 const control = (before: () => void = () => {}): ProtocolClient.FoldControl => ({
@@ -422,6 +427,32 @@ describe("browser close and scope release", () => {
       yield* Kit.closing(ending)(new Target.BrowserClosed({}))
       yield* Deferred.succeed(refuse, undefined)
       assert.isTrue(Exit.isFailure(yield* Fiber.join(close)))
+      assert.strictEqual(Kit.closed(ending)._tag, "BrowserClosed")
+    }))
+})
+
+describe("browser close without a reply", () => {
+  it.effect("keeps the close reason when the protocol reply deadline expires", () =>
+    Effect.gen(function*() {
+      const clock = yield* Effect.clockWith(Effect.succeed)
+      const browser = yield* makeBrowser
+      const client = yield* ProtocolClient.make(browser.transport, CdpWire.wire, { replyClock: clock })
+      const ending: Kit.Ending = {}
+      const close = yield* Kit.closeBrowser(
+        ending,
+        client.root.send(CdpBrowser.close()).pipe(Protocol.withCommandTimeout("1 second")),
+        client.closed
+      ).pipe(Effect.exit, Effect.forkChild({ startImmediately: true }))
+      const sent = yield* browser.next
+      assert.strictEqual(sent.method, "Browser.close")
+      yield* TestClock.adjust("1 second")
+      const exit = yield* Fiber.join(close)
+      assert.isTrue(Exit.isFailure(exit))
+      const error = Option.getOrThrow(Exit.findErrorOption(exit))
+      assert.strictEqual(error.reason._tag, "Protocol")
+      if (error.reason._tag === "Protocol") assert.strictEqual(error.reason.error.reason._tag, "NoReply")
+      // No reply is not a refusal: the already-sent command can still close the browser.
+      yield* browser.lose("the browser exited after the reply deadline")
       assert.strictEqual(Kit.closed(ending)._tag, "BrowserClosed")
     }))
 })
