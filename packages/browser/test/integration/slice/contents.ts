@@ -3783,7 +3783,7 @@ export const contents = (
               ),
               { waitUntil: "load" }
             )
-            yield* page.locator("#field").focus
+            yield* page.locator("#field").focus()
             const ratio = yield* page.evaluateInMainWorld(() => devicePixelRatio)
             // Each capture of the field's box, a blink apart, so a caret that shows in any of them is seen
             for (let i = 0; i < 6; i++) {
