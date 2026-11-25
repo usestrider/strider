@@ -422,6 +422,20 @@ export type Request =
     readonly provisional?: boolean | undefined
   }
   | { readonly op: "expectStop"; readonly token: string }
+  /**
+   * A wait for the first change the page makes (a mutation, an `input`, `change` or focus event, an animation frame)
+   * since `token` was armed, or `cap` milliseconds: what a check made outside the engine waits on before it checks
+   * again. It answers at once when the change came before it, and with `token: null` arms only. Either way it answers
+   * with a token armed as it answers, for the next wait. Its steps only route it to the document their match is in.
+   */
+  | {
+    readonly op: "change"
+    readonly steps: ReadonlyArray<Step>
+    readonly token: string | null
+    readonly cap: number
+  }
+  /** Releases a watch `change` armed, ending a wait on it without arming another. */
+  | { readonly op: "unwatch"; readonly token: string }
   | { readonly op: "title" }
   | { readonly op: "role"; readonly steps: ReadonlyArray<Step> }
   /**
@@ -564,6 +578,12 @@ export const Response = Schema.Union([
      * much of it is in view.
      */
     provisional: Schema.optional(Schema.Boolean)
+  }),
+  Schema.TaggedStruct("Watching", {
+    /** Whether the page changed since the token waited on was armed; a token this document never armed counts. */
+    changed: Schema.Boolean,
+    /** A watch armed as this answer was made, for the next wait. */
+    token: Schema.String
   }),
   Schema.TaggedStruct("Strict", {
     candidates: Schema.Array(Candidate),
@@ -4119,6 +4139,93 @@ export function engine(render: (root: SnapNode) => string) {
     })
   }
 
+  /**
+   * Watches armed for `change`: each one stops at its first change signal, which it keeps until a wait reads it, and
+   * is forgotten a minute after it is armed, so one no wait reads holds nothing for long.
+   */
+  interface Watch {
+    changed: boolean
+    /** Settles the wait on this watch: with whether it changed, and whether to arm the next. */
+    waiter: ((changed: boolean, arm: boolean) => void) | undefined
+    stop: () => void
+  }
+  const watches = new Map<string, Watch>()
+  let watchSequence = 0
+  const watchEpoch = Math.random().toString(36).slice(2)
+  const watchLifetime = 60_000
+  const armWatch = (): string => {
+    const token = `${watchEpoch}:${++watchSequence}`
+    const EVENTS = ["input", "change", "focusin", "focusout"]
+    const unlisten = () => {
+      observer.disconnect()
+      for (const type of EVENTS) removeEventListener(type, noticed, true)
+      cancelFrame(frame)
+    }
+    // The signal is kept until a wait reads it or the watch is forgotten
+    const noticed = () => {
+      unlisten()
+      watch.changed = true
+      watch.waiter?.(true, true)
+    }
+    const observer = new MutationObserver(noticed)
+    observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true })
+    for (const type of EVENTS) addEventListener(type, noticed, true)
+    const frame = onFrame(noticed)
+    // A watch forgotten counts as changed: what happened since is unknown
+    const expiry = setTimer(() => {
+      unlisten()
+      watches.delete(token)
+      watch.waiter?.(true, true)
+    }, watchLifetime)
+    const watch: Watch = {
+      changed: false,
+      waiter: undefined,
+      stop: () => {
+        unlisten()
+        clearTimer(expiry)
+      }
+    }
+    watches.set(token, watch)
+    return token
+  }
+  /** The first change since a token was armed, at once if it came already, or the cap: whether it changed. */
+  const change = (request: Extract<Request, { op: "change" }>): Promise<Response> =>
+    new Promise((resume) => {
+      const answer = (changed: boolean, arm = true) =>
+        resume({ _tag: "Watching", changed, token: arm ? armWatch() : "" })
+      if (request.token === null) return answer(false)
+      const watch = watches.get(request.token)
+      // Armed in another document, or forgotten: what changed since is unknown, so it counts as a change
+      if (watch === undefined) return answer(true)
+      if (watch.changed || request.cap <= 0) {
+        watches.delete(request.token)
+        watch.stop()
+        return answer(watch.changed)
+      }
+      let settled = false
+      const timer = setTimer(() => finish(false, true), request.cap)
+      const finish = (changed: boolean, arm: boolean) => {
+        if (settled) return
+        settled = true
+        watches.delete(request.token!)
+        clearTimer(timer)
+        watch.stop()
+        answer(changed, arm)
+      }
+      watch.waiter = finish
+    })
+
+  /** Releases a watch, and ends a wait on it without arming another: its owner has gone. */
+  const unwatch = (token: string): Response => {
+    const watch = watches.get(token)
+    if (watch !== undefined) {
+      watches.delete(token)
+      watch.stop()
+      watch.waiter?.(false, false)
+    }
+    return { _tag: "Watching", changed: false, token: "" }
+  }
+
   // Snapshots
   const INTERACTIVE = new Set([
     "button",
@@ -4856,6 +4963,10 @@ export function engine(render: (root: SnapNode) => string) {
           return JSON.stringify({ _tag: "Expected", passed: false, observed: null, changed: false } satisfies Response)
         case "expect":
           return JSON.stringify(await expect(request))
+        case "change":
+          return JSON.stringify(await change(request))
+        case "unwatch":
+          return JSON.stringify(unwatch(request.token))
         case "title":
           return JSON.stringify({ _tag: "Title", title: dom.title(document) } satisfies Response)
         case "frame":

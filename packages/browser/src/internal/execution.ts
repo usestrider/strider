@@ -39,6 +39,13 @@ export interface Dispatch {
     at: MonotonicInstant.MonotonicInstant
   ) => Effect.Effect<Engine.Response, Failure>
   /**
+   * The page's locator handlers, run as a check made outside the engine needs them before it checks: whichever
+   * trigger is visible has its handler run, unless handlers are suppressed here. Whether one ran.
+   */
+  readonly handle: Effect.Effect<boolean, Failure>
+  /** Whether the page has locator handlers registered, which `handle` would run. */
+  readonly handlers: boolean
+  /**
    * Draws an input action's annotation and waits before its input, on a page that shows its actions: absent on
    * every other page, so an action there makes no added call.
    */
@@ -86,6 +93,8 @@ export const annotateWith = (page: Model.PageEntry, annotate: Annotate | undefin
 export const ordinary: Dispatch = {
   action: (runtime, page, request, id, at) => Runtime.sendRouted(runtime, page, request, id, at),
   expect: Runtime.send,
+  handle: Effect.succeed(false),
+  handlers: false,
   beforeCheck: Effect.void,
   url: (page, expected, options) => ExpectImpl.watchURL(page, expected, options)
 }
