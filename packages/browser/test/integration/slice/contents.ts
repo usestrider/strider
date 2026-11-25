@@ -3924,6 +3924,56 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("removes cookies by name pattern, by path, and by partition", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* Browser.newPage()
+            const jar = page.context.cookies
+            for (const name of ["pref_a", "pref_b", "keep"]) {
+              yield* jar.set({ name, value: "1", scope: { url: origin } })
+            }
+            yield* jar.set({ name: "scoped", value: "1", scope: { url: `${origin}/app/page` } })
+            // Where a context's list is the cookies its pages are sent (QUIRKS.md, Q225), this page is sent all four
+            yield* page.goto(`${origin}/app/page`)
+            const names = Effect.map(jar.list, (cookies) =>
+              cookies.map((cookie) => cookie.name).sort())
+            assert.deepStrictEqual(yield* names, ["keep", "pref_a", "pref_b", "scoped"])
+            yield* jar.remove({ name: /^pref_/g })
+            assert.deepStrictEqual(yield* names, ["keep", "scoped"])
+            yield* jar.remove({ path: "/app" })
+            assert.deepStrictEqual(yield* names, ["keep"])
+            if (!(yield* fullySupports("cookies.partitioned"))) {
+              const refused = reasonOf(yield* Effect.exit(jar.remove({ partitionKey: { _tag: "Unpartitioned" } })))
+              assert.deepInclude((refused as unknown as CookieJar.CookieJarError).reason, {
+                _tag: "Unsupported",
+                capability: "cookies.partitioned"
+              })
+              assert.deepStrictEqual(yield* names, ["keep"])
+              return
+            }
+            const chip = {
+              name: "chip",
+              scope: { url: "https://shop.example/" },
+              secure: true,
+              sameSite: "none"
+            } as const
+            const news = {
+              _tag: "Partitioned",
+              topLevelSite: Url.Site.make("https://news.example"),
+              crossSiteAncestor: Option.none()
+            } as const
+            yield* jar.set({ ...chip, value: "partitioned", partitionKey: news })
+            yield* jar.set({ ...chip, value: "unpartitioned" })
+            yield* jar.remove({ name: "chip", partitionKey: news })
+            const left = (yield* jar.list).filter((cookie) => cookie.name === "chip")
+            assert.deepStrictEqual(left.map((cookie) => [cookie.partitionKey._tag, Redacted.value(cookie.value)]), [[
+              "Unpartitioned",
+              "unpartitioned"
+            ]])
+          }))
+        }), timeout)
+
       it.effect("reads and writes the current origin's storage from the isolated world", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
@@ -3937,9 +3987,7 @@ export const contents = (
             assert.deepStrictEqual(yield* page.localStorage.get("missing"), Option.none())
             yield* page.localStorage.set("b", Redacted.make("2"))
             assert.strictEqual(
-              yield* page.evaluateInMainWorld(() =>
-                localStorage.getItem("b")
-              ),
+              yield* page.evaluateInMainWorld(() => localStorage.getItem("b")),
               "2"
             )
             assert.deepStrictEqual(
@@ -4302,7 +4350,9 @@ document.getElementById("form").addEventListener("submit", (event) => {
             )
             if (yield* supports("isolatedWorlds")) {
               assert.strictEqual(
-                yield* frame.evaluate(() => Reflect.get(window, "innerGlobal") ?? null),
+                yield* frame.evaluate(() =>
+                  Reflect.get(window, "innerGlobal") ?? null
+                ),
                 null
               )
               assert.strictEqual(

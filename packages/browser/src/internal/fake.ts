@@ -430,12 +430,19 @@ export const connect = (
       cookies: (context) => Effect.succeed(cookies.get(context) ?? []),
       setCookies: (context, added) =>
         Effect.sync(() => {
+          // A cookie is one per name, domain, path, and partition, and one set to expire in the past is removed
+          const partition = (cookie: Adapter.Cookie) => Option.getOrUndefined(cookie.partitionKey)?.topLevelSite
           const kept = (cookies.get(context) ?? []).filter((cookie) =>
             !added.some((each) =>
-              each.name === cookie.name && each.domain === cookie.domain && each.path === cookie.path
+              each.name === cookie.name && each.domain === cookie.domain && each.path === cookie.path &&
+              partition(each) === partition(cookie)
             )
           )
-          cookies.set(context, [...kept, ...added])
+          const now = Date.now() / 1000
+          cookies.set(context, [
+            ...kept,
+            ...added.filter((cookie) => Option.isNone(cookie.expires) || cookie.expires.value > now)
+          ])
         }),
       clearCookies: (context) => Effect.sync(() => void cookies.delete(context)),
       grantPermissions: () => Effect.void,
