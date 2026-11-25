@@ -8,6 +8,7 @@ import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import { TestClock } from "effect/testing"
 import { runInNewContext } from "node:vm"
+import { vi } from "vitest"
 import type * as Access from "../src/internal/access.ts"
 import type * as Adapter from "../src/internal/adapter.ts"
 import * as BrowserImpl from "../src/internal/browser.ts"
@@ -16,6 +17,7 @@ import * as Engine from "../src/internal/engine.ts"
 import * as ExpectImpl from "../src/internal/expect.ts"
 import * as Fake from "../src/internal/fake.ts"
 import * as Handles from "../src/internal/handles.ts"
+import * as Runtime from "../src/internal/runtime.ts"
 
 const observed = { matches: 2, visible: 2 }
 
@@ -485,14 +487,20 @@ describe("Expect.withChecks", () => {
 
 describe("Expect.withChecks watch ownership", () => {
   // A browser creates its watch before the protocol delivers the evaluation's reply.
-  const setup = Effect.fnUntraced(function*(delayReply: number) {
+  const setup = Effect.fnUntraced(function*(delayReply: number, isolatedWorlds = false) {
     const created = yield* Deferred.make<void>()
     const active = new Set<string>()
     let sequence = 0
     const layer = BrowserImpl.layer((sink) =>
       Fake.connect([], {
         info: new Browser.Info(Fake.info),
-        capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+        capabilities: new Browser.CapabilitySet({
+          entries: Fake.capabilities.map((entry) =>
+            entry.name === "isolatedWorlds" && isolatedWorlds
+              ? { ...entry, status: "supported", limitations: [] }
+              : entry
+          )
+        })
       })(sink).pipe(Effect.map((adapter): Adapter.AdapterConnection => ({
         ...adapter,
         realm: () => Effect.succeed("ownership-realm" as Target.RealmId),
@@ -556,6 +564,79 @@ describe("Expect.withChecks watch ownership", () => {
         })).pipe(Effect.provide(layer))
       }))
   }
+
+  it.effect("toSatisfy releases its watch when interrupted before the arming reply arrives", () =>
+    Effect.gen(function*() {
+      const { active, created, layer } = yield* setup(1, true)
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const pending = yield* page.locator("p").pipe(
+          Expect.toSatisfy(() => false),
+          Effect.forkChild
+        )
+        yield* Deferred.await(created)
+        yield* Fiber.interrupt(pending)
+        assert.strictEqual(active.size, 0, "interruption left toSatisfy's page watch alive")
+      })).pipe(Effect.provide(layer))
+    }))
+
+  it.effect("retains ownership while releasing a watch from a rerouted document", () =>
+    Effect.gen(function*() {
+      const { layer } = yield* setup(0, true)
+      const releasing = yield* Deferred.make<void>()
+      const first = "first-document" as Target.DocumentId
+      const last = "last-document" as Target.DocumentId
+      const active = new Set<Target.DocumentId>()
+      let paused = false
+      // A frame locator can route to another live document while an earlier request is pending.
+      const send = vi.spyOn(Runtime, "sendRouted").mockImplementation((_runtime, _page, request, _id, _at, sending) =>
+        Effect.sync(() => {
+          assert(request.op === "change")
+          for (const document of [first, last]) {
+            sending?.(document)
+            active.add(document)
+          }
+          return {
+            response: { _tag: "Watching", changed: false, token: request.next },
+            routed: { document: last, hops: [] }
+          }
+        })
+      )
+      const release = vi.spyOn(Runtime, "releaseInDocument").mockImplementation((_runtime, document) =>
+        Effect.suspend(() => {
+          if (document === first && !paused) {
+            paused = true
+            // Pause before cleanup reaches the old document; interruption must retain ownership for the finalizer.
+            return Deferred.succeed(releasing, undefined).pipe(
+              Effect.andThen(Effect.sleep("100 millis")),
+              Effect.andThen(Effect.sync(() => {
+                active.delete(document)
+              }))
+            )
+          }
+          active.delete(document)
+          return Effect.void
+        })
+      )
+      yield* Effect.scoped(Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        const pending = yield* page.frame(page.locator("iframe")).locator("p").pipe(
+          Expect.toSatisfy(() => false),
+          Effect.forkChild
+        )
+        yield* Deferred.await(releasing)
+        const stopping = yield* Fiber.interrupt(pending).pipe(Effect.forkChild)
+        yield* TestClock.adjust("100 millis")
+        yield* Fiber.join(stopping)
+        assert.deepStrictEqual([...active], [], "interruption forgot a watch in the earlier document")
+      })).pipe(
+        Effect.provide(layer),
+        Effect.ensuring(Effect.sync(() => {
+          send.mockRestore()
+          release.mockRestore()
+        }))
+      )
+    }))
 
   it.effect("refuses a released inspect handle before arming a watch or running the subject", () =>
     Effect.gen(function*() {
