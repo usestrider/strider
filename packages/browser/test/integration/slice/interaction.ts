@@ -5956,6 +5956,80 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect(
+        "presses a key by its code: a right-hand modifier, the keypad with Num Lock on, and media keys where sent",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="i"><p id="log"></p><script>const log = document.getElementById('log'); addEventListener('keydown', (e) => log.textContent += e.key + ':' + e.code + ':' + e.location + (e.shiftKey ? '+S' : '') + ' ')</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* newPage
+              yield* page.goto(url, { waitUntil: "load" })
+              const field = page.locator("#i")
+              yield* field.focus()
+              yield* page.keyboard.press("ControlRight")
+              yield* page.keyboard.press("a")
+              yield* Effect.scoped(Effect.gen(function*() {
+                // A right-hand modifier held is Shift to the keys pressed under it
+                yield* page.keyboard.hold("ShiftRight")
+                yield* page.keyboard.press("b")
+              }))
+              for (const key of ["Numpad1", "NumpadAdd", "NumpadEnter", "Enter"]) yield* page.keyboard.press(key)
+              yield* field.pipe(Expect.toHaveValue("aB1+"))
+              const mute = page.keyboard.press("AudioVolumeMute")
+              if (!(yield* supports("input.mediaKeys"))) {
+                const error = yield* Effect.flip(mute)
+                assert(Keyboard.isKeyboardError(error) && error.reason._tag === "Unsupported", String(error))
+                assert.strictEqual(error.reason.capability, "input.mediaKeys")
+              } else {
+                yield* mute
+              }
+              const expected = {
+                Chromium:
+                  "Control:ControlRight:2 a:KeyA:0 Shift:ShiftRight:2+S B:KeyB:0+S 1:Numpad1:3 +:NumpadAdd:3 Enter:NumpadEnter:3 Enter:Enter:0 AudioVolumeMute:AudioVolumeMute:0",
+                Firefox:
+                  "Control:ControlRight:2 a:KeyA:0 Shift:ShiftRight:2+S B:KeyB:0+S 1:Numpad1:3 +:NumpadAdd:3 Enter:NumpadEnter:3 Enter:Enter:0",
+                WebKit:
+                  "Control:ControlRight:2 a:KeyA:0 Shift:ShiftRight:2 B:KeyB:0 1:Numpad1:3 +:NumpadAdd:3 Enter:NumpadEnter:3 Enter:Enter:0"
+              }[name]
+              assert.strictEqual((yield* page.locator("#log").readText).trim(), expected)
+            }))
+          }),
+        timeout
+      )
+
+      it.effect(
+        "presses a letter's code on its context's layout as the key the layout puts there",
+        () =>
+          Effect.gen(function*() {
+            const { url } = yield* fixture(() =>
+              `<input id="i"><p id="log"></p><script>const log = document.getElementById('log'); addEventListener('keydown', (e) => log.textContent += e.key + ':' + e.code + ' ')</script>`
+            )
+            yield* Effect.scoped(Effect.gen(function*() {
+              const context = yield* Browser.newContext({ keyboardLayout: "fr" })
+              const page = yield* context.newPage
+              yield* page.goto(url, { waitUntil: "load" })
+              yield* page.locator("#i").focus()
+              const pressed = page.keyboard.press("KeyW", { modifiers: ["Shift"] })
+              if (!(yield* fullySupports("input.keyboardLayout"))) {
+                // A backend that sends characters, not places, has no way to put Z on the French layout's KeyW
+                const error = yield* Effect.flip(pressed)
+                assert(Keyboard.isKeyboardError(error) && error.reason._tag === "Unsupported", String(error))
+                assert.strictEqual(error.reason.capability, "input.keyboardLayout")
+                // A code where a US keyboard types the same key is sent
+                yield* page.keyboard.press("KeyA")
+                yield* page.locator("#i").pipe(Expect.toHaveValue("a"))
+                return
+              }
+              yield* pressed
+              yield* page.locator("#i").pipe(Expect.toHaveValue("Z"))
+              assert.strictEqual((yield* page.locator("#log").readText).trim(), "Shift:ShiftLeft Z:KeyW")
+            }))
+          }),
+        timeout
+      )
+
       it.effect("marks a keydown for a key already held as a repeat", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
