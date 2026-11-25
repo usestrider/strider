@@ -72,6 +72,28 @@ describe("A relative URL pattern", () => {
     assert.strictEqual(BaseUrl.pattern("//%7Aq0zq.example/*", base), "http://zq0zq.example/*")
   })
 
+  it("removes a wildcard segment followed by a parent segment", () => {
+    assert.strictEqual(BaseUrl.pattern("/a/*/../b", base), "http://127.0.0.1:8080/a/b")
+  })
+
+  it("keeps a percent-encoded uppercase host when a parent segment removes the wildcard", () => {
+    const pattern = BaseUrl.pattern("//%5A%51%30%5A%51.example/*/../a", base)
+    assert.strictEqual(pattern, "http://zq0zq.example/a")
+    assert.isFalse(UrlPattern.compile(pattern)("http://other.example/a"))
+  })
+
+  it("keeps a Unicode host when a parent segment removes the wildcard", () => {
+    const pattern = BaseUrl.pattern("//ｚｑ０ｚｑ.example/*/../a", base)
+    assert.strictEqual(pattern, "http://zq0zq.example/a")
+    assert.isFalse(UrlPattern.compile(pattern)("http://other.example/a"))
+  })
+
+  it("keeps a host with stripped tabs when a parent segment removes the wildcard", () => {
+    const pattern = BaseUrl.pattern("//z\tq0z\tq.example/*/../a", base)
+    assert.strictEqual(pattern, "http://zq0zq.example/a")
+    assert.isFalse(UrlPattern.compile(pattern)("http://other.example/a"))
+  })
+
   it("preserves marker text in the input and query and fragment delimiters in globs", () => {
     assert.strictEqual(BaseUrl.pattern("/zq0zq/**", base), "http://127.0.0.1:8080/zq0zq/**")
     const pattern = BaseUrl.pattern("/a*?q=*#x*", base)
