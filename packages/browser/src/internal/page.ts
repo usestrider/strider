@@ -758,7 +758,8 @@ export const make = (owner: PageOwner): Page.Page => {
         },
         pattern,
         handler,
-        (options?.phase ?? "request") as P
+        (options?.phase ?? "request") as P,
+        options?.times
       )) as Page.Page["route"],
     addLocatorHandler: (locator, handler, options) =>
       LocatorHandlers.add({ runtime, page: entry, grant: owner.grant }, locator, handler, options),
