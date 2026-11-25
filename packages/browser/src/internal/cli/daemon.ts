@@ -49,6 +49,7 @@ import * as Browser from "../../Browser.ts"
 import * as Chromium from "../../chromium/Chromium.ts"
 import * as CurrentSession from "../../cli/CurrentSession.ts"
 import * as Segment from "../../cli/Segment.ts"
+import type * as Deadline from "../../Deadline.ts"
 import * as Firefox from "../../firefox/Firefox.ts"
 import * as Ledger from "../../Ledger.ts"
 import * as Operation from "../../Operation.ts"
@@ -1550,7 +1551,7 @@ const layerOf = (
   connectionEndpoint: string | undefined
 ): Layer.Layer<
   Browser.Browser,
-  Browser.BrowserError,
+  Browser.BrowserError | UserContext.UserContextError | Deadline.Timeout,
   | ChildProcessSpawner.ChildProcessSpawner
   | FileSystem.FileSystem
   | Socket.WebSocketConstructor

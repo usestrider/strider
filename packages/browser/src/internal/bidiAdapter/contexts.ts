@@ -228,7 +228,12 @@ export const createUserContext = Effect.fnUntraced(function*(state: State, optio
       const { userContext } = yield* Kit.protocol(
         state.send(BrowserBidi.createUserContext({
           // A client certificate context accepts its proxy's own certificate; the proxy checks the site's
-          ...(options.acceptInsecureCerts || certificateProxy !== undefined ? { acceptInsecureCerts: true } : {}),
+          ...(options.acceptInsecureCerts || certificateProxy !== undefined
+            ? { acceptInsecureCerts: true }
+            // A context inherits the session's setting unless it states one, and a launch may have set the session's
+            : state.options.acceptInsecureCerts === true
+            ? { acceptInsecureCerts: false }
+            : {}),
           ...(Option.isSome(options.proxy)
             ? {
               // Launched profiles let proxies carry loopback; it stays direct here

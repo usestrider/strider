@@ -97,7 +97,7 @@ export const requestSizes = (name: string, backend: Layer.Layer<Browser.Browser,
             const served = yield* site
             const context = yield* Browser.newContext({ requestSizes: true })
             const page = yield* context.newPage
-            yield* page.goto(served.origin)
+            yield* page.goto(served.origin, { waitUntil: "load" })
             for (const path of ["/fixed", "/chunked", "/empty"]) {
               const sent = yield* NetworkRequest.next(page, { url: served.origin + path })
               yield* page.evaluateInMainWorld((path) =>
@@ -138,7 +138,7 @@ export const requestSizes = (name: string, backend: Layer.Layer<Browser.Browser,
             const served = yield* site
             const context = yield* Browser.newContext({ requestSizes: true })
             const page = yield* context.newPage
-            yield* page.goto(served.origin)
+            yield* page.goto(served.origin, { waitUntil: "load" })
             const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "strider-har-sizes-")), "sizes.har")
             const sizes = new Map<string, NetworkRequest.Sizes>()
             yield* Effect.scoped(Effect.gen(function*() {
@@ -187,7 +187,7 @@ export const requestSizes = (name: string, backend: Layer.Layer<Browser.Browser,
           Effect.gen(function*() {
             const served = yield* site
             const page = yield* SharedContext.newPage
-            yield* page.goto(served.origin)
+            yield* page.goto(served.origin, { waitUntil: "load" })
             const read = Effect.fnUntraced(function*(limit: number) {
               const response = yield* NetworkResponse.next(page, {
                 url: `${served.origin}/plain`,
@@ -212,7 +212,7 @@ export const requestSizes = (name: string, backend: Layer.Layer<Browser.Browser,
             const served = yield* site
             const context = yield* Browser.newContext({ requestSizes: true })
             const page = yield* context.newPage
-            yield* page.goto(served.origin)
+            yield* page.goto(served.origin, { waitUntil: "load" })
             for (const failed of [false, true]) {
               const path = failed ? "/broken" : "/redirect"
               const sent = yield* NetworkRequest.next(page, { url: served.origin + (failed ? "/broken" : "/stream") })
@@ -324,7 +324,7 @@ export const requestSizes = (name: string, backend: Layer.Layer<Browser.Browser,
           const served = yield* site
           const context = yield* Browser.newContext({ requestSizes: true })
           const page = yield* context.newPage
-          yield* page.goto(served.origin)
+          yield* page.goto(served.origin, { waitUntil: "load" })
           for (let i = 0; i < 2; i++) {
             const sent = yield* NetworkRequest.next(page, { url: served.origin + "/revalidate-script" })
             yield* page.evaluateInMainWorld(async () => {

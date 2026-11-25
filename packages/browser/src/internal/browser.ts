@@ -80,6 +80,53 @@ const contextError = (operation: string, reason: UserContext.UserContextErrorRea
   new UserContext.UserContextError({ operation, reason, diagnostics: Operation.diagnostics(id) })
 
 /**
+ * Why a context Strider didn't create can't take `options`: the ones only creating a context sets, which a
+ * reclaimed context and a launch's default context refuse. A launch that sets one itself, such as accepting
+ * insecure certificates, takes it out of the options first.
+ */
+export const creationOnly = (
+  options: UserContext.Options | undefined,
+  backend: string
+): Reason.Unsupported | Reason.InvalidInput | undefined =>
+  options?.proxy !== undefined
+    ? new Reason.Unsupported({
+      capability: "userContexts.proxy",
+      backend,
+      hint: "A proxy can only be set when creating a context"
+    })
+    : options?.requestTiming
+    ? new Reason.Unsupported({
+      capability: "network.timing",
+      backend,
+      hint: "Request timings must be enabled when creating a new context"
+    })
+    : options?.requestSizes
+    ? new Reason.Unsupported({
+      capability: "network.sizes",
+      backend,
+      hint: "Request sizes must be enabled when creating a new context"
+    })
+    : options?.acceptInsecureCerts !== undefined
+    ? new Reason.Unsupported({
+      capability: "acceptInsecureCerts",
+      backend,
+      hint: "Certificate acceptance can only be set when creating a context"
+    })
+    : options?.clientCertificates !== undefined
+    ? new Reason.Unsupported({
+      capability: "clientCertificates",
+      backend,
+      hint: "Client certificates need a context Strider creates and owns"
+    })
+    : options?.storageStateTracking === true
+    ? new Reason.InvalidInput({
+      input: "storageStateTracking",
+      expected: "false or omitted for a context Strider didn't create",
+      hint: "Tracking must be enabled when the context is first created"
+    })
+    : undefined
+
+/**
  * Whether `name` is an HTML attribute name: one or more characters, none of them whitespace, a control, a
  * noncharacter (U+FDD0 to U+FDEF, and the last two code points of each of the 17 planes), `"`, `'`, `>`, `/`, or `=`.
  */
@@ -209,14 +256,16 @@ const makeContext = (
         },
         pattern,
         handler,
-        (options?.phase ?? "request") as P
+        (options?.phase ?? "request") as P,
+        options?.times
       )) as UserContext.UserContext["route"],
     routeWebSocket: (pattern, handler, options) => WebSocketRoutes.register(runtime, entry, handler, pattern, options),
     exposeBinding: (name, schemas, handler) => Bindings.expose(runtime, entry, undefined, name, schemas, handler),
     addInitScript: (script, options) =>
       InitScripts.add({ runtime, scope: declared, operation: "UserContext.addInitScript" }, entry.id, script, options),
     emulate: (settings) => Emulation.emulate({ runtime, scope: declared, operation: "UserContext.emulate" }, settings),
-    grant: (permissions, options) => Grants.grant(runtime, entry, "UserContext.grant", permissions, options),
+    grant: (permissions, options) => Grants.grant(runtime, entry, "UserContext.grant", "granted", permissions, options),
+    deny: (permissions, options) => Grants.grant(runtime, entry, "UserContext.deny", "denied", permissions, options),
     [Equal.symbol](that: unknown) {
       return UserContext.isUserContext(that) && that.id === entry.id
     },
@@ -378,7 +427,8 @@ const makeDeniedContext = (
       ),
     addInitScript: () => declaration("UserContext.addInitScript"),
     emulate: () => declaration("UserContext.emulate"),
-    grant: () => declaration("UserContext.grant")
+    grant: () => declaration("UserContext.grant"),
+    deny: () => declaration("UserContext.deny")
   } as unknown as UserContext.UserContext
   Handles.registerContext(context, { runtime, entry, grant: Option.none() })
   return context
@@ -396,6 +446,12 @@ const cached = <E extends object, H>(make: (entry: E) => H) => {
     return handle
   }
 }
+
+/** How a launch configures a browser's default context, for the connection's life (`layerLaunched`). */
+const configureDefault = new WeakMap<
+  Browser.Browser,
+  (options: UserContext.Options) => Effect.Effect<unknown, UserContext.UserContextError | Deadline.Timeout, Scope.Scope>
+>()
 
 export const make = Effect.fnUntraced(function*(model: Model.Model) {
   const adapter = model.adapter
@@ -553,63 +609,27 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       readonly context: UserContext.Id
       readonly ownership: { committed: boolean }
       readonly adopt?: boolean
+      /** The default context of a launch, configured for the connection's life */
+      readonly launch?: true
     }
   ): Effect.Effect<UserContext.UserContext, UserContext.UserContextError | Deadline.Timeout, Scope.Scope> => {
+    const operation = mode === undefined || !("context" in mode)
+      ? "Browser.newContext"
+      : mode.launch === true
+      ? "Browser.launch"
+      : "UserContext.reclaim"
     // The context this setup creates: listed once setup ends, as its handle or, if setup failed, as observed
     const awaiting: { entry?: Model.ContextEntry } = {}
     return Effect.gen(function*() {
-      const operation = mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext"
       const { id } = yield* Operation.record
       const proxy = options?.proxy === undefined ? Option.none<Adapter.ProxyOptions>() : Option.some(
         yield* Proxy.normalize(options.proxy, adapter.info.product).pipe(
           Effect.mapError((reason) => contextError(operation, reason, id))
         )
       )
-      if (Option.isSome(proxy) && mode !== undefined && "context" in mode) {
-        return yield* Effect.fail(
-          contextError(
-            operation,
-            new Reason.Unsupported({
-              capability: "userContexts.proxy",
-              backend: adapter.info.product,
-              hint: "A proxy can only be set when creating a context"
-            }),
-            id
-          )
-        )
-      }
-      if (options?.requestTiming && mode !== undefined && "context" in mode) {
-        return yield* Effect.fail(contextError(
-          operation,
-          new Reason.Unsupported({
-            capability: "network.timing",
-            backend: adapter.info.product,
-            hint: "Request timings must be enabled when creating a new context"
-          }),
-          id
-        ))
-      }
-      if (options?.requestSizes && mode !== undefined && "context" in mode) {
-        return yield* Effect.fail(contextError(
-          operation,
-          new Reason.Unsupported({
-            capability: "network.sizes",
-            backend: adapter.info.product,
-            hint: "Request sizes must be enabled when creating a new context"
-          }),
-          id
-        ))
-      }
-      if (options?.acceptInsecureCerts !== undefined && mode !== undefined && "context" in mode) {
-        return yield* Effect.fail(contextError(
-          operation,
-          new Reason.Unsupported({
-            capability: "acceptInsecureCerts",
-            backend: adapter.info.product,
-            hint: "Certificate acceptance can only be set when creating a context"
-          }),
-          id
-        ))
+      if (mode !== undefined && "context" in mode) {
+        const refused = creationOnly(options, adapter.info.product)
+        if (refused !== undefined) return yield* Effect.fail(contextError(operation, refused, id))
       }
       const testIdAttribute = options?.testIdAttribute
       if (testIdAttribute !== undefined && !isAttributeName(testIdAttribute)) {
@@ -681,19 +701,6 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           ))
         }
         preparedCertificates = prepared
-      }
-      if (mode !== undefined && "context" in mode && options?.storageStateTracking === true) {
-        return yield* Effect.fail(
-          contextError(
-            operation,
-            new Reason.InvalidInput({
-              input: "storageStateTracking",
-              expected: "false or omitted when reclaiming a context",
-              hint: "Tracking must be enabled when the context is first created"
-            }),
-            id
-          )
-        )
       }
       const ownerScope = yield* Effect.scope
       const reclaimable = mode !== undefined
@@ -953,7 +960,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         })
       )
       if (options?.permissions !== undefined) {
-        yield* Grants.grant(runtime, entry, operation, options.permissions, undefined).pipe(
+        yield* Grants.grant(runtime, entry, operation, "granted", options.permissions, undefined).pipe(
           Effect.mapError((error) =>
             Deadline.isTimeout(error)
               ? error
@@ -986,7 +993,7 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
       return context
     }).pipe(
       Effect.ensuring(Effect.suspend(() => settled(awaiting))),
-      Operation.named(mode !== undefined && "context" in mode ? "UserContext.reclaim" : "Browser.newContext")
+      Operation.named(operation)
     )
   }
 
@@ -1090,6 +1097,14 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
     })
   }
   ClaimHooks.register(browser, { runtime, context: newContext, recover })
+  // A launch's default context options, for the connection's life: the context is borrowed, never owned, so its
+  // declarations are released when the connection's scope closes and the context itself is never removed
+  configureDefault.set(browser, (options) =>
+    setupContext(options, {
+      context: adapter.defaultContext,
+      ownership: { committed: false },
+      launch: true
+    }))
   return browser
 })
 
@@ -1100,14 +1115,49 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
 export const layer = <E, R>(
   connect: (sink: Adapter.Sink) => Effect.Effect<Adapter.AdapterConnection, E, R>
 ): Layer.Layer<Browser.Browser, E, Exclude<R, Scope.Scope>> =>
+  Layer.effect(BrowserService.Browser)(Effect.map(build(connect), ({ browser }) => browser))
+
+/**
+ * The layer a backend's launch builds: `layer`, whose default context takes `defaultContext` for the connection's
+ * life. An option only creating a context sets is refused before the browser starts, unless the launch has set it
+ * and taken it out.
+ */
+export const layerLaunched = <E, R>(
+  backend: string,
+  defaultContext: UserContext.Options | undefined,
+  connect: (sink: Adapter.Sink) => Effect.Effect<Adapter.AdapterConnection, E, R>
+): Layer.Layer<
+  Browser.Browser,
+  E | UserContext.UserContextError | Deadline.Timeout,
+  Exclude<R, Scope.Scope>
+> =>
   Layer.effect(BrowserService.Browser)(Effect.gen(function*() {
-    // The browser lives in a scope of its own, and the closing mark is the outer scope's last finalizer, so it runs
-    // before anything the browser's scope gained, such as a context's process or a page, closes
-    const outer = yield* Effect.scope
-    const inner = yield* Scope.fork(outer)
-    const { sink, attach, closing } = yield* Model.make().pipe(Scope.provide(inner))
-    yield* Effect.addFinalizer(() => closing)
-    const adapter = yield* connect(sink).pipe(Scope.provide(inner))
-    const model = yield* attach(adapter).pipe(Scope.provide(inner))
-    return yield* make(model).pipe(Scope.provide(inner))
+    const refused = creationOnly(defaultContext, backend)
+    if (refused !== undefined) {
+      return yield* Effect.flatMap(
+        Operation.record,
+        ({ id }) => Effect.fail(contextError("Browser.launch", refused, id))
+      )
+        .pipe(Operation.named("Browser.launch"))
+    }
+    const { browser, scope } = yield* build(connect)
+    if (defaultContext !== undefined) {
+      // In the browser's scope, which closes as the layer's does
+      yield* configureDefault.get(browser)!(defaultContext).pipe(Scope.provide(scope))
+    }
+    return browser
   }))
+
+const build = Effect.fnUntraced(function*<E, R>(
+  connect: (sink: Adapter.Sink) => Effect.Effect<Adapter.AdapterConnection, E, R>
+) {
+  // The browser lives in a scope of its own, and the closing mark is the outer scope's last finalizer, so it runs
+  // before anything the browser's scope gained, such as a context's process or a page, closes
+  const outer = yield* Effect.scope
+  const inner = yield* Scope.fork(outer)
+  const { sink, attach, closing } = yield* Model.make().pipe(Scope.provide(inner))
+  yield* Effect.addFinalizer(() => closing)
+  const adapter = yield* connect(sink).pipe(Scope.provide(inner))
+  const model = yield* attach(adapter).pipe(Scope.provide(inner))
+  return { browser: yield* make(model).pipe(Scope.provide(inner)), scope: inner }
+})

@@ -494,7 +494,7 @@ export const make = (owner: PageOwner): Page.Page => {
         JSHandle.Serialized<A>,
         Page.PageError | Target.TargetGone | Deadline.Timeout
       >,
-    capability: (capability) => Capabilities.acquire(runtime, entry, capability, owner.grant),
+    capability: (capability, options) => Capabilities.acquire(runtime, entry, capability, options, owner.grant),
     context: owner.context,
     goto: (url, options) => {
       const result = HttpUrl.fromString(url)
@@ -758,7 +758,8 @@ export const make = (owner: PageOwner): Page.Page => {
         },
         pattern,
         handler,
-        (options?.phase ?? "request") as P
+        (options?.phase ?? "request") as P,
+        options?.times
       )) as Page.Page["route"],
     addLocatorHandler: (locator, handler, options) =>
       LocatorHandlers.add({ runtime, page: entry, grant: owner.grant }, locator, handler, options),

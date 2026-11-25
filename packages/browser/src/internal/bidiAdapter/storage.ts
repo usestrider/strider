@@ -1,6 +1,6 @@
 /**
  * Cookies and permissions on BiDi. A user context's cookies are its storage partition's; permissions are granted
- * per origin, and since BiDi has no reset, the ones granted are remembered and set back to `prompt`.
+ * or denied per origin, and since BiDi has no reset, the ones set are remembered and set back to `prompt`.
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -82,7 +82,7 @@ const setPermission = (
   context: ContextEntry,
   origin: string,
   name: string,
-  setting: "granted" | "prompt"
+  setting: "granted" | "denied" | "prompt"
 ) =>
   state.send(Permissions.setPermission({
     descriptor: { name },
@@ -95,7 +95,8 @@ export const grantPermissions = Effect.fnUntraced(function*(
   state: State,
   id: UserContext.Id,
   origin: Option.Option<string>,
-  permissions: ReadonlyArray<string>
+  permissions: ReadonlyArray<string>,
+  setting: "granted" | "denied"
 ) {
   const context = yield* contextOf(state, id)
   if (Option.isNone(origin)) {
@@ -104,7 +105,7 @@ export const grantPermissions = Effect.fnUntraced(function*(
     )
   }
   for (const name of permissions) {
-    yield* Kit.protocol(setPermission(state, context, origin.value, name, "granted"))
+    yield* Kit.protocol(setPermission(state, context, origin.value, name, setting))
     const set = state.granted.get(id) ?? new Set()
     set.add(JSON.stringify([origin.value, name]))
     state.granted.set(id, set)

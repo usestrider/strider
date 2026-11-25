@@ -243,6 +243,37 @@ export interface Options<P extends Phase = "request"> {
    * @default "request"
    */
   readonly phase?: P | undefined
+  /**
+   * How many requests the route handles before it removes itself, so the routes registered before it handle the
+   * rest. Every run of the handler counts, whatever it decides, falling through and failing included.
+   *
+   * **Details**
+   *
+   * Requests the route matches at the same time each take one of its uses before its handler runs, so the handler
+   * runs no more than `times` times; once they are taken, the route falls through at once. It removes itself after
+   * the last request it handled is decided, and `remove` then does nothing.
+   *
+   * **Gotchas**
+   *
+   * A value that isn't a positive integer fails `route` with `RouteError`, reason `InvalidInput`.
+   *
+   * **Example** (Failing the first request, then letting the rest through)
+   *
+   * ```ts import.meta.vitest
+   * import { Page, Route } from "@usestrider/browser"
+   * import { HttpServerResponse } from "effect/http"
+   *
+   * const failOnce = (page: Page.Page) =>
+   *   page.route(
+   *     "https://shop.example.com/api/cart",
+   *     () => Route.fulfill(HttpServerResponse.empty({ status: 503 })),
+   *     { times: 1 }
+   *   )
+   * ```
+   *
+   * @default unlimited: the route stays until it is removed or its scope closes
+   */
+  readonly times?: number | undefined
 }
 
 // A value, so its export needs a binding at run time

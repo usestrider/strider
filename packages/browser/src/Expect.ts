@@ -910,6 +910,77 @@ export const toHaveCount: DualMatcher<Locator.ReadonlyLocator, [count: number]> 
 )
 
 /**
+ * Expects a function you pass to return `true` on a locator's one match, checking again each time the page signals a
+ * change until it does.
+ *
+ * **When to use**
+ *
+ * Use to wait for something about an element that no other matcher states, such as a property the page sets or a
+ * computed value. For a check the program computes, such as on a value it read, use `Expect.that`; that is why
+ * there is no form that takes an `Effect`, which would be `Expect.that` again.
+ *
+ * **Details**
+ *
+ * The function runs in the page, in Strider's own world of the match's document, never in the page's scripts' own,
+ * and gets the match first, then the arguments, which cross as they do for `locator.evaluate`: by value, or a handle
+ * as what it holds. A promise it returns is awaited. Only `true` passes.
+ *
+ * On each check it runs the page's locator handlers, finds the one match again, and calls the function; while
+ * the function is pending, the handlers run again on each change signal, so one can dismiss what it waits on. A
+ * handler still running when the function answers finishes first, and then the answer counts: it isn't checked again. It checks
+ * again after each change signal the other locator matchers check on (a mutation, an input, change or focus event,
+ * or an animation frame), including one that came while the function ran. Each check reads the page as it is then,
+ * so a state that comes and goes between two checks isn't seen. While nothing matches, or several elements
+ * do, it keeps waiting, and a failure says how many matched; with no match, it names the nearest match and
+ * suggests locators, as the other matchers do. It returns nothing: to read a value once it passes, call
+ * `locator.evaluate`.
+ *
+ * **Gotchas**
+ *
+ * If the function throws, or its promise rejects, the expectation fails at once with the `LocatorError` that
+ * `locator.evaluate` gives, rather than waiting. On stock WebKit, which gives Strider no world of its own, it fails
+ * as `Unsupported`, as `locator.evaluate` does there.
+ *
+ * **Example** (Waiting for a menu button to expand)
+ *
+ * ```ts import.meta.vitest
+ * import { Expect, Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const expanded = Effect.fn("expanded")(function*(page: Page.ReadonlyPage) {
+ *   yield* page.getByRole("button", { name: "Menu" }).pipe(
+ *     Expect.toSatisfy(
+ *       (button, name: string) => button.getAttribute(name) === "true",
+ *       "aria-expanded"
+ *     )
+ *   )
+ * })
+ * ```
+ *
+ * @see that
+ * @stability unstable
+ * @category matchers
+ * @since 0.1.0
+ */
+export const toSatisfy: {
+  <Args extends ReadonlyArray<unknown>>(
+    fn: (element: Element, ...args: Args) => boolean | Promise<boolean>,
+    ...args: Args
+  ): (
+    locator: Locator.ReadonlyLocator
+  ) => Effect.Effect<void, ExpectationFailed | Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+  <Args extends ReadonlyArray<unknown>>(
+    locator: Locator.ReadonlyLocator,
+    fn: (element: Element, ...args: Args) => boolean | Promise<boolean>,
+    ...args: Args
+  ): Effect.Effect<void, ExpectationFailed | Locator.LocatorError | Target.TargetGone | Deadline.Timeout>
+} = dual(
+  (args) => Locator.isLocator(args[0]),
+  (locator: Locator.ReadonlyLocator, fn: Function, ...args: ReadonlyArray<unknown>) =>
+    ExpectImpl.toSatisfy(locator, fn, args)
+)
+
+/**
  * Expects the accessibility tree of a locator's one match, or of a page, to match a pattern.
  *
  * **Details**

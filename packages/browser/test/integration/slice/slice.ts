@@ -185,7 +185,7 @@ export const slice = (
           const url = yield* fixture("<p>site</p>")
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const failed = yield* Effect.gen(function*() {
               const next = yield* PageNavigation.next(page, { url: "nosuchscheme:x" })
               yield* page.evaluateInMainWorld(() => {
@@ -213,7 +213,7 @@ export const slice = (
             const reloaded = yield* page.reload()
             assert(reloaded._tag === "Committed", String(reloaded))
             assert(Option.isNone(reloaded.response), "a reload of a data: URL makes no network request")
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const blob = yield* page.evaluateInMainWorld(() =>
               URL.createObjectURL(new Blob(["<p>blob</p>"], { type: "text/html" }))
             )
@@ -370,7 +370,7 @@ root.querySelector("#inner").attachShadow({mode:"open"}).innerHTML = "<button>Ne
           const url = yield* fixture(`<div class="box" style="width:100px;height:100px"></div><div class="box"></div>`)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             for (
               const [selector, options, observed] of [
                 ["#missing", {}, { matches: 0 }],

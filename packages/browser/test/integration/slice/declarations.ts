@@ -175,7 +175,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* tlsSite
           const sibling = yield* Browser.newPage()
-          const rejected = yield* sibling.goto(origin).pipe(Effect.flip)
+          const rejected = yield* sibling.goto(origin, { waitUntil: "load" }).pipe(Effect.flip)
           assert(Page.isPageError(rejected) && rejected.reason._tag === "NavigationFailed")
           const options = { acceptInsecureCerts: true, eventLog: 0 }
           if (!(yield* supports("acceptInsecureCerts"))) {
@@ -488,7 +488,7 @@ export const declarations = (
         Effect.gen(function*() {
           const { origin } = yield* site
           const page = yield* SharedContext.newPage
-          yield* page.goto(`${origin}/hello`)
+          yield* page.goto(`${origin}/hello`, { waitUntil: "load" })
           for (let n = 0; n < 10; n++) {
             yield* Effect.scoped(Effect.gen(function*() {
               const route = yield* page.route(`${origin}/hello*`, () =>
@@ -654,6 +654,69 @@ export const declarations = (
                return [await read('/api/user'), await read('/api/user', { method: 'POST' }), await read('/api/other'), echo.headers['x-test'], echo.body]`
             )
             assert.deepStrictEqual(result, [{ from: "context" }, { from: "page" }, { from: "context" }, "1", "changed"])
+          }))
+        }), timeout)
+
+      it.effect(
+        "hands requests to the route under one with times once it has run that often, fallthrough included",
+        () =>
+          Effect.gen(function*() {
+            const { origin } = yield* site
+            yield* Effect.scoped(Effect.gen(function*() {
+              const page = yield* SharedContext.newPage
+              yield* page.route(`${origin}/api/**`, () =>
+                Route.fulfill(json({ from: "under" })))
+              let runs = 0
+              const limited = yield* page.route(
+                `${origin}/api/**`,
+                () =>
+                  ++runs === 1 ? Route.fallthrough : Route.fulfill(json({ from: "limited" })),
+                { times: 2 }
+              )
+              const result = yield* run(
+                page,
+                origin,
+                `const read = () => fetch('/api/user').then((r) => r.json()).then((body) => body.from);
+               return [await read(), await read(), await read()]`
+              )
+              assert.deepStrictEqual(result, ["under", "limited", "under"])
+              assert.strictEqual(runs, 2)
+              assert.strictEqual(yield* limited.hits, 2)
+              // Already gone, so removing it again changes nothing
+              yield* limited.remove
+              assert.deepStrictEqual(yield* run(page, origin, `return fetch('/api/user').then((r) => r.json())`), {
+                from: "under"
+              })
+            }))
+          }),
+        timeout
+      )
+
+      it.effect("runs a route with times: 1 for only one of two requests paused at once", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.route(`${origin}/api/**`, () =>
+              Route.fulfill(json({ from: "under" })))
+            let runs = 0
+            const once = yield* page.route(
+              `${origin}/api/**`,
+              () => {
+                runs++
+                return Effect.andThen(Effect.sleep("300 millis"), Route.fulfill(json({ from: "once" })))
+              },
+              { times: 1 }
+            )
+            const result = yield* run(
+              page,
+              origin,
+              `const read = (n) => fetch('/api/' + n).then((r) => r.json()).then((body) => body.from);
+               return (await Promise.all([read(1), read(2)])).sort()`
+            )
+            assert.deepStrictEqual(result, ["once", "under"])
+            assert.strictEqual(runs, 1)
+            assert.strictEqual(yield* once.hits, 1)
           }))
         }), timeout)
 
@@ -882,8 +945,7 @@ export const declarations = (
               ).length
             const read = `return fetch('/cached.js?released').then((r) => r.status)`
             yield* Effect.scoped(Effect.gen(function*() {
-              yield* page.route(`${origin}/cached.js*`, () =>
-                Route.continue)
+              yield* page.route(`${origin}/cached.js*`, () => Route.continue)
               assert.strictEqual(yield* run(page, origin, read), 200)
             }))
             assert.strictEqual(yield* run(page, origin, read), 200)
@@ -930,9 +992,7 @@ export const declarations = (
               (server) =>
                 Effect.promise(() =>
                   new Promise<void>((resolve) => {
-                    server.close(() =>
-                      resolve()
-                    )
+                    server.close(() => resolve())
                     server.closeAllConnections()
                   })
                 )
@@ -1231,7 +1291,7 @@ export const declarations = (
           }))
         }), timeout)
 
-      it.effect("rejects a pattern that doesn't compile", () =>
+      it.effect("rejects a pattern that doesn't compile, and times that isn't a positive integer", () =>
         Effect.gen(function*() {
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
@@ -1240,6 +1300,15 @@ export const declarations = (
                 Route.continue)
             )
             assert(Route.isRouteError(error) && error.reason._tag === "InvalidInput", String(error))
+            for (const times of [0, -1, 1.5, Number.POSITIVE_INFINITY]) {
+              const refused = yield* Effect.flip(page.route("https://example.com/**", () =>
+                Route.continue, { times }))
+              assert(
+                Route.isRouteError(refused) && refused.reason._tag === "InvalidInput" &&
+                  refused.reason.input === "times",
+                String(refused)
+              )
+            }
           }))
         }), timeout)
 
@@ -1724,6 +1793,73 @@ export const declarations = (
           }))
         }), timeout)
 
+      it.effect("denies a permission, which its change reports, and restores what was in force once removed", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          const query = "return navigator.permissions.query({ name: 'notifications' }).then((p) => p.state)"
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            if (!(yield* supports("permissions"))) {
+              const error = yield* Effect.flip(page.context.deny(["notifications"], { origin }))
+              assert(Declaration.isDeclarationError(error) && error.reason._tag === "Unsupported", String(error))
+              return
+            }
+            const browser = yield* Browser.Browser
+            const tabs = yield* browser.pages
+            const observed = (yield* tabs[0]!.control).context
+            const refused = yield* Effect.flip(observed.deny(["notifications"], { origin }))
+            assert(Declaration.isDeclarationError(refused) && refused.reason._tag === "NotPermitted", String(refused))
+            // The page that's open hears the change
+            yield* page.goto(fixtureUrl(
+              origin,
+              `<p id="state">pending</p><script>navigator.permissions.query({ name: 'notifications' }).then((status) => { document.getElementById('state').textContent = status.state; status.onchange = () => { document.getElementById('state').textContent = 'changed ' + status.state } })</script>`
+            ))
+            yield* page.locator("#state").pipe(Expect.toHaveText("prompt"))
+            const denied = yield* page.context.deny(["notifications"], { origin })
+            yield* page.locator("#state").pipe(Expect.toHaveText("changed denied"))
+            assert.strictEqual(yield* run(page, origin, query), "denied")
+            yield* denied.remove
+            assert.strictEqual(yield* run(page, origin, query), "prompt")
+            // A denial over a grant holds while it lives; once it goes, the grant is in force again
+            yield* page.context.grant(["notifications"], { origin })
+            const over = yield* page.context.deny(["notifications"], { origin })
+            assert.strictEqual(yield* run(page, origin, query), "denied")
+            yield* over.remove
+            assert.strictEqual(yield* run(page, origin, query), "granted")
+            const remaining = yield* page.context.deny(["notifications"], { origin })
+            const newest = yield* page.context.grant(["notifications"], { origin })
+            yield* newest.remove
+            assert.strictEqual(yield* run(page, origin, query), "denied")
+            const rejected = yield* Effect.flip(
+              page.context.grant(["notifications", "not-a-permission"], { origin })
+            )
+            assert(
+              Declaration.isDeclarationError(rejected) && rejected.reason._tag === "InvalidInput",
+              String(rejected)
+            )
+            assert.strictEqual(yield* run(page, origin, query), "denied")
+            yield* remaining.remove
+            assert.strictEqual(yield* run(page, origin, query), "granted")
+          }))
+        }), timeout)
+
+      it.effect("uses the latest permission declaration across explicit and every-origin settings", () =>
+        Effect.gen(function*() {
+          if (!(yield* supports("permissions.anyOrigin"))) {
+            return
+          }
+          const { origin } = yield* site
+          const query = "return navigator.permissions.query({ name: 'notifications' }).then((p) => p.state)"
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.context.grant(["notifications"], { origin })
+            const denied = yield* page.context.deny(["notifications"])
+            assert.strictEqual(yield* run(page, origin, query), "denied")
+            yield* denied.remove
+            assert.strictEqual(yield* run(page, origin, query), "granted")
+          }))
+        }), timeout)
+
       // ── Content Security Policy ──
 
       it.effect(
@@ -1969,7 +2105,7 @@ export const declarations = (
           yield* first.context.clock.install({ mode: "controlled", at: 1000 })
           const second = yield* SharedContext.newPage
           const { origin } = yield* site
-          yield* second.goto(fixtureUrl(origin, "<p>second</p>"))
+          yield* second.goto(fixtureUrl(origin, "<p>second</p>"), { waitUntil: "load" })
           yield* first.evaluateInMainWorld(() => {
             setTimeout(() => {
               throw Object.create(null)
@@ -2128,7 +2264,7 @@ export const declarations = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
             yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
-            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
+            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"), { waitUntil: "load" })
             // A timer hands off through a real task, which sets a timer due within the same adjustment
             yield* page.evaluateInMainWorld(() => {
               const channel = new MessageChannel()
@@ -2154,7 +2290,7 @@ export const declarations = (
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
             yield* page.clock.install({ mode: "controlled", at: "2026-01-01T00:00:00Z" })
-            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"))
+            yield* page.goto(fixtureUrl(origin, "<p>clock</p>"), { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               const log: Array<string> = []
               Reflect.set(window, "__log", log)

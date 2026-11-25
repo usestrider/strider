@@ -18,6 +18,7 @@ const recording = () => {
     navigablesById: new Map([[id, { removed: false, page: { id, bidi: "context-1", children: new Set() } }]]),
     mouseCapture: new Map(),
     touchCapture: new Map(),
+    pointerIn: new Map(),
     send: (command: { readonly params: unknown }) => Effect.sync(() => void sent.push(command.params))
   } as unknown as State
   return { id, sent, state }

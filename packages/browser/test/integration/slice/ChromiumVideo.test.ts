@@ -27,6 +27,29 @@ const backend = Chromium.layer({ executablePath: chromium.executable }).pipe(
   Layer.provideMerge(NodeServices.layer)
 )
 
+const probe = (file: string) =>
+  JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+    "-v",
+    "error",
+    "-show_streams",
+    "-show_format",
+    "-of",
+    "json",
+    file
+  ], { encoding: "utf8" }))
+
+const frameTimes = (file: string): Array<number> =>
+  JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+    "-v",
+    "error",
+    "-show_frames",
+    "-of",
+    "json",
+    file
+  ], { encoding: "utf8" })).frames.map((frame: { best_effort_timestamp_time: string }) =>
+    Number(frame.best_effort_timestamp_time)
+  )
+
 describe("Chromium video writer", () => {
   layer(backend, { excludeTestServices: true })((it) => {
     it.effect(
@@ -109,6 +132,141 @@ describe("Chromium video writer", () => {
         }),
       60_000
     )
+
+    it.effect("sizes a recording to the viewport scaled to fit 800 by 800 by default", () =>
+      Effect.gen(function*() {
+        const page = yield* Browser.newPage({ emulation: { viewport: { width: 1280, height: 720 } } })
+        yield* page.goto("data:text/html,<p>default size</p>")
+        const recording = yield* Effect.scoped(Effect.gen(function*() {
+          const video = yield* page.capability(Capability.Video)
+          yield* Effect.sleep("300 millis")
+          return video
+        }))
+        const video = probe(yield* recording.file).streams[0]
+        assert.deepStrictEqual([video.width, video.height], [800, 450])
+      }), 60_000)
+
+    it.effect("sizes a recording by default when the page navigates as it is acquired", () =>
+      Effect.gen(function*() {
+        const page = yield* Browser.newPage()
+        yield* page.goto("data:text/html,<p>before</p>")
+        const recording = yield* Effect.scoped(Effect.gen(function*() {
+          const video = yield* page.capability(Capability.Video)
+          yield* page.goto("data:text/html,<p>after</p>")
+          yield* Effect.sleep("300 millis")
+          return video
+        }))
+        const video = probe(yield* recording.file).streams[0]
+        assert.isAtMost(Math.max(video.width, video.height), 800)
+        assert.isAbove(Math.min(video.width, video.height), 0)
+      }), 60_000)
+
+    it.effect(
+      "writes to a path at a size and constant frame rate, without a downloads directory",
+      () =>
+        Effect.gen(function*() {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-video-path-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const target = path.join(directory, "run.webm")
+          const page = yield* Browser.newPage({
+            downloads: "deny",
+            emulation: { viewport: { width: 640, height: 480 } }
+          })
+          yield* page.goto("data:text/html,<p>sized</p>")
+          const recording = yield* Effect.scoped(Effect.gen(function*() {
+            const video = yield* page.capability(Capability.Video, {
+              path: target,
+              size: { width: 320, height: 200 },
+              fps: 10
+            })
+            yield* Effect.sleep("500 millis")
+            return video
+          }))
+          assert.strictEqual(yield* recording.file, target)
+          const video = probe(target).streams[0]
+          assert.deepStrictEqual([video.width, video.height], [320, 200])
+          // Frames every 100 milliseconds, the last of them the one-millisecond end marker at the rounded stop time
+          const times = frameTimes(target)
+          assert.isAtLeast(times.length, 3)
+          for (let index = 1; index < times.length; index++) {
+            assert.closeTo(times[index]! - times[index - 1]!, 0.1, 0.001)
+          }
+          assert.deepStrictEqual(fs.readdirSync(directory), ["run.webm"])
+        }),
+      60_000
+    )
+
+    it.effect(
+      "refuses an existing file without overwrite, and replaces it with overwrite",
+      () =>
+        Effect.gen(function*() {
+          const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-video-overwrite-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+          const target = path.join(directory, "run.webm")
+          fs.writeFileSync(target, "kept")
+          const page = yield* Browser.newPage()
+          yield* page.goto("data:text/html,<p>overwrite</p>")
+          const refused = yield* Effect.flip(
+            Effect.scoped(page.capability(Capability.Video, { path: target, overwrite: false }))
+          )
+          assert(Capability.isCapabilityError(refused), String(refused))
+          assert.deepInclude(refused.reason, { _tag: "InvalidInput", input: "path" })
+          assert.strictEqual(fs.readFileSync(target, "utf8"), "kept")
+          const missing = yield* Effect.flip(
+            Effect.scoped(page.capability(Capability.Video, { path: path.join(directory, "no/such/run.webm") }))
+          )
+          assert(Capability.isCapabilityError(missing), String(missing))
+          assert.deepInclude(missing.reason, { _tag: "InvalidInput", input: "path" })
+          const recording = yield* Effect.scoped(Effect.gen(function*() {
+            const video = yield* page.capability(Capability.Video, { path: target })
+            yield* Effect.sleep("300 millis")
+            return video
+          }))
+          yield* recording.file
+          assert.deepStrictEqual(Array.from(fs.readFileSync(target).subarray(0, 4)), [0x1a, 0x45, 0xdf, 0xa3])
+        }),
+      60_000
+    )
+
+    it.effect("refuses a directory as the video file path before recording", () =>
+      Effect.gen(function*() {
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-video-directory-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+        const target = path.join(directory, "existing-directory")
+        fs.mkdirSync(target)
+        const page = yield* Browser.newPage()
+        yield* page.goto("data:text/html,<p>invalid path</p>")
+        const result = yield* Effect.scoped(page.capability(Capability.Video, { path: target })).pipe(Effect.result)
+        assert.strictEqual(result._tag, "Failure", "a directory is not a file destination")
+        if (result._tag === "Failure") {
+          assert(Capability.isCapabilityError(result.failure))
+          assert.deepInclude(result.failure.reason, { _tag: "InvalidInput", input: "path" })
+        }
+        assert.deepStrictEqual(fs.readdirSync(directory), ["existing-directory"])
+      }), 60_000)
+
+    it.effect("keeps a destination file that appears during recording", () =>
+      Effect.gen(function*() {
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), "strider-video-race-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => fs.rmSync(directory, { recursive: true, force: true })))
+        const target = path.join(directory, "run.webm")
+        const page = yield* Browser.newPage()
+        yield* page.goto("data:text/html,<p>race</p>")
+        const recording = yield* Effect.scoped(Effect.gen(function*() {
+          const recording = yield* page.capability(Capability.Video, { path: target, overwrite: false })
+          fs.writeFileSync(target, "created during recording")
+          yield* Effect.sleep("300 millis")
+          return recording
+        }))
+        const failure = yield* recording.file.pipe(Effect.flip)
+        assert(Capability.isCapabilityError(failure))
+        assert.strictEqual(failure.reason._tag, "BackendFailure")
+        assert.strictEqual(fs.readFileSync(target, "utf8"), "created during recording")
+        const saved = fs.readdirSync(directory).filter((name) => name !== "run.webm")
+        assert.strictEqual(saved.length, 1)
+        assert.include(failure.message, saved[0]!)
+        assert.strictEqual(probe(path.join(directory, saved[0]!)).streams[0].codec_name, "vp8")
+      }), 60_000)
 
     it.effect("backpressures native acknowledgements without stopping page timers", () =>
       Effect.gen(function*() {

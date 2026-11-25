@@ -6,6 +6,7 @@
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Result from "effect/Result"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -22,6 +23,7 @@ import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import * as Overlays from "./overlays.ts"
 import * as Runtime from "./runtime.ts"
+import * as VideoOptions from "./videoOptions.ts"
 import * as WebAuthn from "./webauthn.ts"
 
 /** Each capability: its support table entry, and the backends that have it. */
@@ -49,11 +51,100 @@ const fromAdapter = (runtime: Runtime.Runtime, capability: string, id: Diagnosti
 const gone = (page: Model.PageEntry, reason: Target.CloseReason, id: Diagnostics.OperationId) =>
   new Target.TargetGone({ target: { _tag: "Page", id: page.id }, reason, diagnostics: Operation.diagnostics(id) })
 
-/** A capability of a page, for the caller's scope. */
-export const acquire = <H>(
+/** A video of a page: its options checked, its size settled, and its file moved to `path` when it ends. */
+const video = Effect.fnUntraced(function*(
   runtime: Runtime.Runtime,
   page: Model.PageEntry,
-  capability: Capability.Capability<H, "inspect" | "control">,
+  raw: Capability.VideoOptions | undefined
+) {
+  const { id } = yield* Operation.record
+  const refuse = (input: string, expected: string, hint: string) =>
+    Effect.fail(capabilityError("Video", new Reason.InvalidInput({ input, expected, hint }), id))
+  const valid = VideoOptions.validate(raw)
+  if (Result.isFailure(valid)) return yield* Effect.fail(capabilityError("Video", valid.failure, id))
+  const options = valid.success
+  const target = options.path
+  const overwrite = options.overwrite ?? true
+  let directory = Option.none<string>()
+  if (target !== undefined) {
+    if (Option.isNone(runtime.fileSystem)) {
+      return yield* Effect.fail(capabilityError(
+        "Video",
+        new Reason.Unsupported({
+          capability: "capability.video",
+          backend: runtime.backend,
+          hint: "Recording to a path needs the program's FileSystem, which a launched browser's layer provides"
+        }),
+        id
+      ))
+    }
+    const fs = runtime.fileSystem.value
+    const parent = target.replace(/[\\/][^\\/]*$/, "") || "/"
+    const kind = yield* fs.stat(parent).pipe(Effect.map((info) => info.type), Effect.orElseSucceed(() => "missing"))
+    if (kind !== "Directory") return yield* refuse("path", "a file in a directory that exists", target)
+    // What is at the path already, if anything: only a file can be replaced, and only when overwrite allows it
+    const existing = yield* fs.stat(target).pipe(
+      Effect.map((info) => Option.some(info.type)),
+      // A path that can't be read, as without permission, is refused as an entry that isn't a file
+      Effect.catch((error) =>
+        Effect.succeed(error.reason._tag === "NotFound" ? Option.none<string>() : Option.some("Unreadable"))
+      )
+    )
+    if (Option.isSome(existing) && existing.value !== "File") {
+      return yield* refuse("path", "a file path, not a directory or other entry", target)
+    }
+    if (!overwrite && Option.isSome(existing)) {
+      return yield* refuse("path", "a path with no file, since overwrite is false", target)
+    }
+    directory = Option.some(parent)
+  }
+  // A declared viewport is the model's, so it is read here; without one, the backend measures the window in a way a
+  // navigation can't interrupt
+  const declared = options.size === undefined
+    ? yield* runtime.model.adapter.viewportSize(page.id).pipe(Effect.mapError(fromAdapter(runtime, "Video", id)))
+    : Option.none()
+  const written = yield* runtime.model.adapter.video(page.id, {
+    size: options.size !== undefined
+      ? Option.some(options.size)
+      : Option.map(declared, VideoOptions.defaultSize),
+    fps: Option.fromNullishOr(options.fps),
+    directory
+  }).pipe(Effect.mapError(fromAdapter(runtime, "Video", id)))
+  const finished = Effect.mapError(written, fromAdapter(runtime, "Video", Operation.idNow()))
+  const file = target === undefined || Option.isNone(runtime.fileSystem)
+    ? finished
+    : Effect.flatMap(finished, (path) => {
+      const fs = runtime.fileSystem.pipe(Option.getOrThrow)
+      const moved = (error: { readonly message: string }) =>
+        capabilityError(
+          "Video",
+          new Reason.BackendFailure({
+            kind: "Rejected",
+            method: "FileSystem",
+            hint: `The recording stays at ${path}: it couldn't be moved to ${target}: ${error.message}`
+          }),
+          Operation.idNow()
+        )
+      // A hard link fails where a file already is, so a file that appeared while recording is never replaced
+      return (overwrite
+        ? fs.rename(path, target)
+        : fs.link(path, target).pipe(Effect.andThen(fs.remove(path)))).pipe(
+          Effect.mapError(moved),
+          Effect.as(target)
+        )
+    })
+  const recording: Capability.VideoRecording = {
+    file: (yield* Effect.cached(file)).pipe(Effect.map((path) => path as FilePath.Local))
+  }
+  return recording
+})
+
+/** A capability of a page, for the caller's scope. */
+export const acquire = <H, Options = never>(
+  runtime: Runtime.Runtime,
+  page: Model.PageEntry,
+  capability: Capability.Capability<H, "inspect" | "control", Options>,
+  options?: Options | undefined,
   grant: Option.Option<Access.Grant> = Option.none()
 ): Effect.Effect<H, Capability.CapabilityError | Target.TargetGone | Deadline.Timeout, Scope.Scope> =>
   Effect.gen(function*() {
@@ -102,16 +193,8 @@ export const acquire = <H>(
         }
         return reader as H
       }
-      case "Video": {
-        const file = yield* adapter.video(page.id).pipe(Effect.mapError(fromAdapter(runtime, capability.name, id)))
-        const recording: Capability.VideoRecording = {
-          file: file.pipe(
-            Effect.map((path) => path as FilePath.Local),
-            Effect.mapError(fromAdapter(runtime, capability.name, Operation.idNow()))
-          )
-        }
-        return recording as H
-      }
+      case "Video":
+        return (yield* video(runtime, page, options as Capability.VideoOptions | undefined)) as H
       default: {
         const frames = yield* adapter.screencast(page.id).pipe(
           Effect.mapError(fromAdapter(runtime, capability.name, id))

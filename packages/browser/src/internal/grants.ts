@@ -1,18 +1,28 @@
 /**
- * Permission grants. L0's reset clears every grant in a context, so L1 keeps the grants
+ * Permission grants and denials. L0's reset clears every setting in a context, so L1 keeps the grants and denials
  * in force in the context's state, which the model's fold writes, and recomputes on each change: a removal resets,
- * then grants what remains. Each name is
- * granted on its own, so a name a backend rejects (Firefox's list is shorter) fails naming it.
+ * then sets what remains. For each origin and name, the latest declaration in force that covers it wins, whether it
+ * names that origin or every origin. Chromium keeps a setting for one origin ahead of one for every origin, whichever
+ * came later, so L1 sends what that rule resolves to (`resolve`), not each declaration in turn: a setting for every
+ * origin also goes to each origin that has one of its own. Each name is set on its own, so a name a backend rejects
+ * (Firefox's list is shorter) fails naming it. Each change holds its context's one permit (`locks`) from reading
+ * what's in force to recording it, and a removal from taking its declaration out to setting the rest again, so the
+ * browser's settings and the declarations a later reset sets again never disagree. A removal is arranged before its
+ * call takes the permit and takes the permit itself, so a scope closed during a call waits for the call to end, and a
+ * removal that takes the permit before its call marks the declaration removed, so the call sends and records nothing.
  */
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
+import * as Ref from "effect/Ref"
 import * as Scope from "effect/Scope"
+import * as Semaphore from "effect/Semaphore"
 import type * as Deadline from "../Deadline.ts"
 import * as Declaration from "../Declaration.ts"
 import * as Reason from "../Reason.ts"
 import type * as Target from "../Target.ts"
 import type * as UserContext from "../UserContext.ts"
+import type * as Adapter from "./adapter.ts"
 import type * as Model from "./model.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
@@ -23,10 +33,60 @@ const origin = (input: string | undefined): Option.Option<string> | undefined =>
   return parsed === null ? undefined : Option.some(parsed.origin)
 }
 
+const locks = new WeakMap<Model.ContextEntry, Semaphore.Semaphore>()
+
+const lockOf = (entry: Model.ContextEntry): Semaphore.Semaphore => {
+  let lock = locks.get(entry)
+  if (lock === undefined) {
+    lock = Semaphore.makeUnsafe(1)
+    locks.set(entry, lock)
+  }
+  return lock
+}
+
+type Removal = { readonly _tag: "Pending" } | { readonly _tag: "Recorded"; readonly held: Scope.Closeable } | {
+  readonly _tag: "Removed"
+}
+
+const pending: Removal = { _tag: "Pending" }
+const removed: Removal = { _tag: "Removed" }
+
+const key = (origin: string, name: string) => JSON.stringify([origin, name])
+
+/**
+ * What declarations, oldest first, leave in force, one name per entry: for each name, the latest declaration for every
+ * origin that names it; for each origin a declaration names, and each name, the latest declaration covering both.
+ */
+export const resolve = (grants: ReadonlyArray<Model.GrantEntry>): ReadonlyArray<Model.GrantEntry> => {
+  const everywhere = new Map<string, Adapter.PermissionSetting>()
+  const each = new Map<string, Model.GrantEntry>()
+  for (const declaration of grants) {
+    for (const name of declaration.permissions) {
+      if (Option.isSome(declaration.origin)) {
+        each.set(key(declaration.origin.value, name), {
+          origin: declaration.origin,
+          permissions: [name],
+          setting: declaration.setting
+        })
+        continue
+      }
+      everywhere.set(name, declaration.setting)
+      for (const [at, setting] of each) {
+        if (setting.permissions[0] === name) each.set(at, { ...setting, setting: declaration.setting })
+      }
+    }
+  }
+  return [
+    ...Array.from(everywhere, ([name, setting]) => ({ origin: Option.none(), permissions: [name], setting })),
+    ...each.values()
+  ]
+}
+
 export const grant = (
   runtime: Runtime.Runtime,
   entry: Model.ContextEntry,
   operation: string,
+  setting: Adapter.PermissionSetting,
   permissions: ReadonlyArray<UserContext.Permission>,
   options: UserContext.GrantOptions | undefined
 ): Effect.Effect<
@@ -65,38 +125,66 @@ export const grant = (
           : failure.reason
       )
     }
-    const grant: Model.GrantEntry = { origin: where, permissions: [...permissions] }
+    const grant: Model.GrantEntry = { origin: where, permissions: [...permissions], setting }
     const inForce = Effect.map(entry.state.get, (state) => state.grants)
     const apply = (grants: ReadonlyArray<Model.GrantEntry>) =>
-      Effect.forEach(grants, (each) => adapter.grantPermissions(context, each.origin, each.permissions), {
-        discard: true
-      })
-    const scope = yield* Scope.fork(yield* Effect.scope)
-    for (const name of permissions) {
-      yield* adapter.grantPermissions(context, where, [name]).pipe(
-        Effect.mapError((error) => mapped(error, name)),
-        // What this call granted goes again, with the grants before it: cleanup, which the deadline doesn't end
-        Effect.onError(() =>
-          adapter.resetPermissions(context).pipe(
-            Effect.andThen(Effect.flatMap(inForce, apply)),
-            Effect.ignore,
-            Effect.andThen(Scope.close(scope, Exit.void)),
-            Operation.detached
-          )
-        )
+      Effect.forEach(
+        resolve(grants),
+        (each) => adapter.grantPermissions(context, each.origin, each.permissions, each.setting),
+        { discard: true }
       )
-    }
-    // What a removal grants again, after it resets; once this one is removed, the others
+    const lock = lockOf(entry)
+    const replay = adapter.resetPermissions(context).pipe(Effect.andThen(Effect.flatMap(inForce, apply)), Effect.ignore)
+    const scope = yield* Scope.fork(yield* Effect.scope)
+    // Where the declaration is: not recorded yet, held in the model's scope, or removed. The call and its removal
+    // read and change it only while holding the permit
+    const state = yield* Ref.make<Removal>(pending)
+    // The removal is arranged before the permit is taken, so closing the scope never waits for the permit inside the
+    // hold that records the declaration: a scope closed during a send waits for this call to finish, then takes out
+    // what it recorded, if anything. Taking it out, resetting and setting the others again share one hold. A removal
+    // that runs first, as when the scope was already closed, leaves its mark, so the call then sends nothing
     yield* Scope.addFinalizer(
       scope,
-      adapter.resetPermissions(context).pipe(
-        Effect.andThen(Effect.flatMap(inForce, apply)),
-        Effect.ignore,
-        Operation.detached
-      )
+      lock.withPermits(1)(Effect.flatMap(
+        Ref.getAndSet(state, removed),
+        (was) => was._tag === "Recorded" ? Scope.close(was.held, Exit.void).pipe(Effect.andThen(replay)) : Effect.void
+      )).pipe(Operation.detached)
     )
-    yield* runtime.model.grant(entry, grant).pipe(Scope.provide(scope))
-    return { remove: Scope.close(scope, Exit.void) } satisfies Declaration.Registration
+    // Waiting for the permit is part of the operation, under its deadline
+    const sent = yield* lock.withPermits(1)(Effect.gen(function*() {
+      // A scope that closed before this call took the permit has removed the declaration already
+      if ((yield* Ref.get(state))._tag === "Removed") return false
+      // A declaration for every origin overrides the settings of origins of their own for its names too
+      const overridden = Option.isSome(where) ?
+        [] :
+        resolve(yield* inForce).filter((each) =>
+          Option.isSome(each.origin) && permissions.includes(each.permissions[0]!)
+        )
+      const sends = [
+        ...permissions.map((name) => ({ origin: where, name, reported: true })),
+        ...overridden.map((each) => ({ origin: each.origin, name: each.permissions[0]!, reported: false }))
+      ]
+      for (const send of sends) {
+        yield* adapter.grantPermissions(context, send.origin, [send.name], setting).pipe(
+          Effect.mapError((error) => mapped(error, send.reported ? send.name : undefined)),
+          // What this call set goes again, with the declarations before it, under the permit this call holds:
+          // cleanup, which the deadline doesn't end
+          Effect.onError(() => Operation.detached(replay))
+        )
+      }
+      // The model holds the declaration in a scope of its own, which only its removal closes; recording it and
+      // telling the removal where it is aren't interrupted apart
+      yield* Effect.uninterruptible(Effect.gen(function*() {
+        const held = yield* Scope.make()
+        yield* runtime.model.grant(entry, grant).pipe(Scope.provide(held))
+        yield* Ref.set(state, { _tag: "Recorded", held })
+      }))
+      return true
+    })).pipe(
+      // A call that ends without recording releases its scope after the permit, which its removal then takes
+      Effect.onError(() => Operation.detached(Scope.close(scope, Exit.void)))
+    )
+    return { remove: sent ? Scope.close(scope, Exit.void) : Effect.void } satisfies Declaration.Registration
   }).pipe(Operation.named(operation, {
     attributes: { "browser.context.id": entry.id, "browser.permissions": permissions.join(",") }
   }))

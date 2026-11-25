@@ -75,6 +75,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
         "missing native phases remain unavailable; TLS timing is not exposed",
         "successful completion only; redirect end may be an observation bound"
       ]),
+      entry("input.frameBoundaries", "supported"),
       entry("input.topLevelDesignMode", "unsupported", [
         "Firefox cannot focus an input in a top-level design-mode document; native typing reaches the document body"
       ]),
@@ -253,7 +254,10 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
         "Firefox's browsingContext.startScreencast records a WebM file on the browser's host, and streams no frames"
       ]),
       ownership === "launched"
-        ? entry("capability.video", "supported", ["written where the page's context downloads to"])
+        ? entry("capability.video", "supported", [
+          "written to the given path, or else where the page's context downloads to",
+          "the size is a box the page fits inside with its shape kept, unpadded; the frame rate is a ceiling"
+        ])
         : entry("capability.video", "unsupported", [
           "Firefox writes the file on its own host, out of the program's reach"
         ])
@@ -373,6 +377,8 @@ export const connect: (
       const created = yield* Session.new_({
         capabilities: {
           alwaysMatch: {
+            // The session's setting is its default context's; a context it creates states its own
+            ...(options.acceptInsecureCerts === true ? { acceptInsecureCerts: true } : {}),
             // A session's prompt settings are the whole browser's: an attached one leaves the user's file choosers
             // alone
             unhandledPromptBehavior: {
@@ -469,7 +475,7 @@ export const connect: (
             "Firefox's browsingContext.startScreencast records a WebM file on the browser's host, and streams no frames"
           )
         ),
-      video: (page) => Capture.video(state, page),
+      video: (page, options) => Capture.video(state, page, options),
       createAuthenticator: () =>
         Effect.fail(
           Kit.unsupported("capability.virtualAuthenticator", "Native virtual authenticators require Chromium CDP")
@@ -486,7 +492,8 @@ export const connect: (
       cookies: (context) => Storage.cookies(state, context),
       setCookies: (context, list) => Storage.setCookies(state, context, list),
       clearCookies: (context) => Storage.clearCookies(state, context),
-      grantPermissions: (context, origin, permissions) => Storage.grantPermissions(state, context, origin, permissions),
+      grantPermissions: (context, origin, permissions, setting) =>
+        Storage.grantPermissions(state, context, origin, permissions, setting),
       resetPermissions: (context) => Storage.resetPermissions(state, context),
       responseBody: (hop) => Network.responseBody(state, hop),
       captureRequestBody: (request, limit) => Network.captureRequestBody(state, request, limit),

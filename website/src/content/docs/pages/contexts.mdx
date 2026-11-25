@@ -47,7 +47,8 @@ const listed = Effect.fn("listed")(function*() {
 ```
 
 A context someone else made, such as one in a browser you attached to, is listed as an observed context, whose
-`control` gives access for a scope, as the default context's does. A context another client makes after you
+`control` gives access for a scope, as the default context's does, unless the launch
+[configured it](#configuring-the-default-context-at-launch). A context another client makes after you
 connect is listed once a page opens in it. On Chromium, a context another client removes stays listed until you
 disconnect, though its pages close.
 
@@ -193,10 +194,10 @@ holds for a service worker's requests to an untrusted site under `acceptInsecure
 
 ## Settings for a while
 
-`emulate` and `grant` apply settings for a state only some steps should see, such as the network dropping or a
-permission granted after a prompt, and restore what was there when their scope closes. `emulate` works on a
-context, for every page in it, popups included, or on a page, for that page alone; `grant` works only on a context,
-and not on WebKit:
+`emulate`, `grant`, and `deny` apply settings for a state only some steps should see, such as the network dropping
+or a permission granted after a prompt, and restore what was there when their scope closes. `emulate` works on a
+context, for every page in it, popups included, or on a page, for that page alone; `grant` and `deny` work only on a
+context, and not on WebKit:
 
 ```ts
 import { Expect, Page } from "@usestrider/browser"
@@ -216,6 +217,24 @@ const nearestStore = Effect.fn("nearestStore")(function*(page: Page.Page) {
     yield* page.context.emulate({ geolocation: { latitude: 52.52, longitude: 13.405 } })
     yield* page.getByRole("button", { name: "Use my location" }).click()
     yield* page.getByText("Nearest store: Mitte").pipe(Expect.toBeVisible)
+  }))
+})
+```
+
+`deny` refuses the permissions it names for its scope, as a visitor who said no would. For each permission and
+origin, the latest grant or denial that covers it wins, whether it names that origin or every origin, so a denial
+overrides an earlier grant of the same permission until it's removed, and removing the last one leaves the
+permission at `prompt` again:
+
+```ts
+import { Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const locationRefused = Effect.fn("locationRefused")(function*(page: Page.Page) {
+  yield* Effect.scoped(Effect.gen(function*() {
+    yield* page.context.deny(["geolocation"], { origin: "https://shop.example.com" })
+    yield* page.getByRole("button", { name: "Use my location" }).click()
+    yield* page.getByText("Enter your postcode instead").pipe(Expect.toBeVisible)
   }))
 })
 ```
@@ -283,6 +302,41 @@ const profileInbox = Effect.fn("profileInbox")(
   Effect.provide(AdasProfile)
 )
 ```
+
+## Configuring the default context at launch
+
+A launch's `defaultContext` takes the settings `Browser.newContext` takes and applies them to the default context,
+its first tab and every page opened in it later, for as long as the layer lasts. The context is then controlled
+for that time, and closing the layer undoes the settings without removing the context:
+
+```ts
+import { Browser } from "@usestrider/browser"
+import { Chromium } from "@usestrider/browser/chromium"
+import { Effect, Redacted } from "effect"
+
+const IntranetProfile = Chromium.layer({
+  executablePath: "/usr/bin/chromium",
+  userDataDir: "./profiles/ada",
+  defaultContext: {
+    httpCredentials: { username: "ada", password: Redacted.make("secret") },
+    downloads: { directory: "/tmp/intranet-downloads" }
+  }
+})
+
+const intranetHome = Effect.fn("intranetHome")(
+  function*() {
+    const browser = yield* Browser.Browser
+    const context = yield* browser.defaultContext.control
+    const [firstTab] = yield* context.pages.waitFor((pages) => pages.length > 0)
+    yield* firstTab!.goto("https://intranet.example.com")
+  },
+  Effect.scoped,
+  Effect.provide(IntranetProfile)
+)
+```
+
+A proxy, client certificates, request timings and sizes, and storage-state tracking can only be set on a context
+Strider creates, so a launch refuses them before the browser starts.
 
 ## Cookies and storage
 

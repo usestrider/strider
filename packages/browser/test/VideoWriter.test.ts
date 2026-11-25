@@ -61,6 +61,55 @@ describe("VideoWriter", () => {
     assert.strictEqual(entry(true).status, "supported")
   })
 
+  it.effect("streams a long constant-rate idle gap before materializing every copy", () =>
+    Effect.gen(function*() {
+      let copies = 0
+      let copiesAtFirstWrite: number | undefined
+      const data = new Uint8Array([1])
+      const first: VideoWriter.Frame = {
+        at: 0,
+        format: "png",
+        width: 2,
+        height: 2,
+        get data() {
+          copies++
+          return data
+        }
+      }
+      const handle = ChildProcessSpawner.makeHandle({
+        pid: ChildProcessSpawner.ProcessId(1),
+        exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+        isRunning: Effect.succeed(false),
+        kill: () => Effect.void,
+        stdin: Sink.forEach(() =>
+          Effect.sync(() => {
+            copiesAtFirstWrite ??= copies
+          })
+        ),
+        stdout: Stream.empty,
+        stderr: Stream.empty,
+        all: Stream.empty,
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+        unref: Effect.succeed(Effect.void)
+      })
+      yield* Effect.gen(function*() {
+        const writer = yield* VideoWriter.VideoWriter
+        yield* writer.write(
+          Stream.make(first, { at: 600e9, format: "png", width: 2, height: 2, data }),
+          { path: "/tmp/idle.webm", width: 2, height: 2, fps: 10 }
+        )
+      }).pipe(
+        Effect.provide(VideoWriter.layerFfmpeg({ path: "/opt/ffmpeg" })),
+        Effect.provideService(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() => Effect.succeed(handle))
+        )
+      )
+      assert.isDefined(copiesAtFirstWrite)
+      assert.isBelow(copiesAtFirstWrite!, 6000, "the encoder can consume before the entire idle gap is allocated")
+    }))
+
   it.effect("spawns and releases the real encoder on a live clock under TestClock", () =>
     Effect.gen(function*() {
       const testClock = yield* Clock.Clock

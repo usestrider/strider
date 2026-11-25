@@ -177,10 +177,23 @@ const decideChooser = Effect.fnUntraced(function*(
  * none matches; when every one that matched fell through or failed, or the backend refused a decision, it is also
  * published as an `AutoResolution`.
  */
-const decideRequest = Effect.fnUntraced(function*(
+const decideRequest = (
   fold: Fold.Fold,
   adapter: Adapter.AdapterConnection,
-  { obligation, owner, paused, routes }: Extract<Obligation, { readonly _tag: "PausedRequest" }>
+  request: Extract<Obligation, { readonly _tag: "PausedRequest" }>
+): Effect.Effect<void> => {
+  // What the routes asked do once the request is decided, such as removing one that has run out of uses
+  const settled: Array<Effect.Effect<void>> = []
+  return decideByRoutes(fold, adapter, request, settled).pipe(
+    Effect.ensuring(Effect.suspend(() => Effect.all(settled, { discard: true })))
+  )
+}
+
+const decideByRoutes = Effect.fnUntraced(function*(
+  fold: Fold.Fold,
+  adapter: Adapter.AdapterConnection,
+  { obligation, owner, paused, routes }: Extract<Obligation, { readonly _tag: "PausedRequest" }>,
+  settled: Array<Effect.Effect<void>>
 ) {
   // Never the browser's own prompt at a challenge: headless, it waits forever
   const fallback: Adapter.Decision = paused.phase === "auth"
@@ -189,6 +202,7 @@ const decideRequest = Effect.fnUntraced(function*(
   if (routes.length === 0) return yield* resolve(adapter, obligation, fallback)
   for (const route of routes) {
     const answer = yield* route.ask(obligation, paused)
+    if (answer.settled !== undefined) settled.push(answer.settled)
     if (answer._tag === "Fallthrough") continue
     if (answer._tag === "Decided") {
       const sent = yield* Effect.exit(adapter.resolve(obligation, answer.decision))

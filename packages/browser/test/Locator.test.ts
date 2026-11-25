@@ -793,7 +793,8 @@ describe("Locator.blur", () => {
                   point: null,
                   draggable: false,
                   checked: null,
-                  fill: null
+                  fill: null,
+                  selected: null
                 })
               }
             } as const
@@ -1026,7 +1027,8 @@ it.effect("does not acknowledge native fill while its insertion guard is still p
                 point: null,
                 draggable: false,
                 checked: null,
-                fill: request.apply ? "guarded" : null
+                fill: request.apply ? "guarded" : null,
+                selected: null
               })
             }
           } as const
@@ -1106,7 +1108,8 @@ const guardCleanup = Effect.fnUntraced(function*(disarm: "gone" | "missing", end
               point: null,
               draggable: false,
               checked: null,
-              fill: request.apply ? "guarded" : null
+              fill: request.apply ? "guarded" : null,
+              selected: null
             })
           }
         } as const
@@ -1215,7 +1218,8 @@ for (const boundary of ["unanswered", "set", "type", "guarded", "confirmed"] as 
                   point: null,
                   draggable: false,
                   checked: null,
-                  fill: request.apply ? (boundary === "confirmed" ? "guarded" : boundary) : null
+                  fill: request.apply ? (boundary === "confirmed" ? "guarded" : boundary) : null,
+                  selected: null
                 })
               }
             } as const
@@ -1503,7 +1507,8 @@ describe("an action whose engine call is unanswered at the deadline", () => {
                       point: { x: 1, y: 1 },
                       draggable: false,
                       checked: null,
-                      fill: null
+                      fill: null,
+                      selected: null
                     })
                   }
                 } as const

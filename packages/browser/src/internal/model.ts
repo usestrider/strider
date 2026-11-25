@@ -126,10 +126,20 @@ export type PausedRequestEvent = Extract<Adapter.ObligationSubject, { readonly _
 
 /** What a route said about a paused request. */
 export type RouteAnswer =
-  | { readonly _tag: "Decided"; readonly decision: Adapter.Decision }
-  | { readonly _tag: "Fallthrough" }
-  /** It failed, was interrupted, ran out of time or returned what isn't a decision; it logged why. */
-  | { readonly _tag: "Failed" }
+  & (
+    | { readonly _tag: "Decided"; readonly decision: Adapter.Decision }
+    | { readonly _tag: "Fallthrough" }
+    /** It failed, was interrupted, ran out of time or returned what isn't a decision; it logged why. */
+    | { readonly _tag: "Failed" }
+  )
+  & {
+    /**
+     * What the route does once the request is decided, by whichever route or default: one that has run as often
+     * as its `times` allows removes itself then, since releasing its intercept sooner could let the request go on
+     * before its decision is sent.
+     */
+    readonly settled?: Effect.Effect<void> | undefined
+  }
 
 /** A route, as the model asks it. */
 export interface RouteEntry {
@@ -374,6 +384,8 @@ export interface ContextSettings {
 export interface GrantEntry {
   readonly origin: Option.Option<string>
   readonly permissions: ReadonlyArray<string>
+  /** What it sets them to: a grant's `granted`, a denial's `denied`. */
+  readonly setting: Adapter.PermissionSetting
 }
 
 /** Everything about a context that changes: its pages and workers, its end, and the caller's settings. */
@@ -385,7 +397,7 @@ export interface ContextState {
   readonly settings: ContextSettings
   /** Its routes, oldest first: asked after a page's own. */
   readonly routes: ReadonlyArray<RouteEntry>
-  /** The permission grants in force, oldest first, which a reset grants again (`grants.ts`). */
+  /** The permission grants and denials in force, oldest first, which a reset sets again (`grants.ts`). */
   readonly grants: ReadonlyArray<GrantEntry>
 }
 

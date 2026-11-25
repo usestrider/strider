@@ -45,6 +45,8 @@ let sharedFile = ""
 let fileStarted = Date.now()
 const completed = new Map<string, { file?: string | undefined; sequence: number; bytes: number; overflow: boolean }>()
 let nextConnection = 0
+// Open `sharedAcquisition` calls: connections created meanwhile are the shared context's, wherever they are created.
+let sharedAcquisitions = 0
 const serialize = (value: unknown): string =>
   typeof value === "string"
     ? value
@@ -173,6 +175,15 @@ const save = (file: string, trace: TraceBuffer, scope: string, passing = false):
 }
 
 install({
+  sharedAcquisition() {
+    sharedAcquisitions++
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      sharedAcquisitions--
+    }
+  },
   checkpoint(label) {
     const task = TestRunner.getCurrentTest<RunnerTestCase | undefined>()
     if (task === undefined || active.size !== 1) return undefined
@@ -188,7 +199,10 @@ install({
     const current = TestRunner.getCurrentTest<RunnerTestCase | undefined>()?.id
     // Anonymous Effect layers acquire once in beforeEach, then keep their resources until afterAll.
     // Setup acquisitions follow the observing test rather than becoming owned by the first test.
-    const owner = !ambiguous && current !== undefined && active.get(current)?.inBody === true ? current : undefined
+    const owner =
+      sharedAcquisitions === 0 && !ambiguous && current !== undefined && active.get(current)?.inBody === true
+        ? current
+        : undefined
     const record = (kind: string, value: unknown, origin?: Origin) => {
       const payload = serialize(value)
       // A connection created by a test remains that test's, even after its completion.
@@ -223,7 +237,8 @@ install({
         }
         return
       }
-      if (active.size === 1 && !ambiguous && active.values().next().value!.inBody) {
+      // A replacement's launch is setup, like a hook's, even inside a case's body
+      if (sharedAcquisitions === 0 && active.size === 1 && !ambiguous && active.values().next().value!.inBody) {
         active.values().next().value!.trace.record(id, kind, payload, origin)
       } else {
         shared.record(id, kind, payload, origin)
@@ -250,6 +265,7 @@ export default class FailureTraceRunner extends TestRunner {
     lastPassingFile = undefined
     active.clear()
     completed.clear()
+    sharedAcquisitions = 0
   }
   override async onBeforeRunTask(task: RunnerTask) {
     await super.onBeforeRunTask(task)

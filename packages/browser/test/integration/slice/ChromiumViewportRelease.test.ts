@@ -47,7 +47,7 @@ describe("Chromium viewport release on context close", () => {
           const { elapsed, warnings } = yield* closing(Effect.gen(function*() {
             const context = yield* Browser.newContext({ emulation: { viewport: { width: 1280, height: 720 } } })
             const page = yield* context.newPage
-            yield* page.goto("data:text/html,<body>x</body>")
+            yield* page.goto("data:text/html,<body>x</body>", { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               setTimeout(() => {
                 for (;;) { /* blocks the renderer until its page is removed */ }
