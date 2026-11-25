@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect"
 import type * as NetworkConnection from "../NetworkConnection.ts"
 import type * as Page from "../Page.ts"
 import type * as UserContext from "../UserContext.ts"
+import * as BaseUrl from "./baseUrl.ts"
 import * as EventModule from "./eventModule.ts"
 import * as Filters from "./filters.ts"
 import * as Handles from "./handles.ts"
@@ -27,7 +28,7 @@ export const { history, next, stream } = EventModule.make<
       Effect.andThen(
         wanted === "eventSource" ? Filters.requires(runtime, operation, "networkConnections.eventSource") : Effect.void
       ),
-      Effect.andThen(Filters.url(operation, filter?.url)),
+      Effect.andThen(Filters.url(operation, filter?.url, BaseUrl.of(found.behind.entry))),
       Effect.map((matches) => ({
         channel: found.behind.entry.events.connection,
         accepts: (entry) =>

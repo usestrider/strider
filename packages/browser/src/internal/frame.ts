@@ -4,9 +4,7 @@
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
-import * as HttpUrl from "effect/http/Url"
 import * as Option from "effect/Option"
-import * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import type * as Deadline from "../Deadline.ts"
@@ -21,6 +19,7 @@ import * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BaseUrl from "./baseUrl.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Evaluation from "./evaluation.ts"
 import type * as Model from "./model.ts"
@@ -244,19 +243,22 @@ export const make = (owner: Owner): Frame.Frame => {
 
   const goto = (url: string, options?: Page.GotoOptions | undefined) => {
     const operation = "Frame.goto"
-    const parsed = HttpUrl.fromString(url)
-    if (Result.isFailure(parsed)) {
+    const base = BaseUrl.of(entry)
+    const parsed = BaseUrl.url(url, base)
+    if (parsed === undefined) {
       return Effect.fail(frameError(
         operation,
         new Reason.InvalidInput({
           input: "url",
-          expected: "an absolute URL",
-          hint: `${JSON.stringify(url)} doesn't parse`
+          expected: base === undefined ? "an absolute URL" : `a URL, absolute or relative to ${base}`,
+          hint: base === undefined
+            ? `${JSON.stringify(url)} doesn't parse; a context's baseURL would resolve a relative one`
+            : `${JSON.stringify(url)} doesn't parse`
         }),
         Operation.idNow()
       ))
     }
-    const href = parsed.success.href
+    const href = parsed.href
     const waitUntil = options?.waitUntil ?? "commit"
     // A child frame's readiness is only waited for where the browser reports it
     const ready = Effect.gen(function*() {

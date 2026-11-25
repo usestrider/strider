@@ -368,6 +368,8 @@ export interface ContextSettings {
   readonly keyboardLayout: Keyboard.Layout
   /** The attribute its pages' `getByTestId` matches (`UserContext.Options.testIdAttribute`). */
   readonly testIdAttribute: string
+  /** What its pages' relative URLs and URL patterns resolve against (`UserContext.Options.baseURL`). */
+  readonly baseURL: string | undefined
 }
 
 /** Permissions granted to a context, for an origin or every one, until the grant's scope closes. */

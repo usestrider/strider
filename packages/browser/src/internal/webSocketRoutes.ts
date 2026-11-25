@@ -19,6 +19,7 @@ import * as Target from "../Target.ts"
 import * as Url from "../Url.ts"
 import * as WebSocketRoute from "../WebSocketRoute.ts"
 import * as Adapter from "./adapter.ts"
+import * as BaseUrl from "./baseUrl.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Events from "./events.ts"
 import * as Handlers from "./handlers.ts"
@@ -86,7 +87,7 @@ export const register = <E, R>(
   runtime: Runtime.Runtime,
   entry: Model.ContextEntry,
   handler: (connection: WebSocketRoute.Connection) => Effect.Effect<void, E, R>,
-  pattern: Url.Pattern | string,
+  given: Url.Pattern | string,
   options: WebSocketRoute.Options
 ): Effect.Effect<
   WebSocketRoute.Registration,
@@ -98,6 +99,8 @@ export const register = <E, R>(
       new WebSocketRoute.WebSocketRouteError({ reason, diagnostics: Operation.diagnosticsNow() })
     const record = yield* Operation.record
     const adapter = runtime.model.adapter
+    // A relative pattern resolves against the context's base URL, with its scheme made a WebSocket one
+    const pattern = BaseUrl.webSocketPattern(given, BaseUrl.of(entry))
     if (options?.implementation !== "script") {
       return yield* Effect.fail(
         fail(

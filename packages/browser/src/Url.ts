@@ -100,6 +100,10 @@ export const Pattern = Schema.String.pipe(Schema.brand("~@usestrider/browser/Url
  *   `ws://localhost:8080/`, and `"HTTP://Example.com:80"` matches `http://example.com/`. A string that isn't an
  *   absolute URL is compared as it is.
  *
+ * Given to a page or a context whose `baseURL` is set, a pattern that doesn't start with `*` or a scheme resolves
+ * against the base first, its `*`, `**`, and `:name` parts kept: with a base of `http://localhost:3000/`, `"/api/**"`
+ * is the glob `"http://localhost:3000/api/**"`, and `"/products/:id"` a `URLPattern`.
+ *
  * An invalid pattern fails with `InvalidInput` at once.
  *
  * **Example** (Matching with a glob and a `URLPattern`)

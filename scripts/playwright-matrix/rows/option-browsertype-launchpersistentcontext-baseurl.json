@@ -4,9 +4,15 @@
     "method:BrowserType.launchPersistentContext"
   ],
   "option": "baseURL",
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public option; the parent row does not imply option parity.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Browser",
+      "symbol": "LaunchOptions",
+      "url": "/docs/api/browser/Browser#LaunchOptions"
+    }
+  ],
+  "notes": "The launch's defaultContext takes baseURL, with a userDataDir for a persistent profile.",
   "capabilities": [],
   "requirements": []
 }

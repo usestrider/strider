@@ -26,6 +26,7 @@ import * as Route from "../Route.ts"
 import type * as Target from "../Target.ts"
 import type * as Url from "../Url.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BaseUrl from "./baseUrl.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Handlers from "./handlers.ts"
 import type * as Model from "./model.ts"
@@ -234,7 +235,7 @@ const intercepted = (
 /** Registers a route for the caller's scope; removing it, or closing the scope, releases its intercept. */
 export const register = <E, R, P extends Route.Phase>(
   owner: Owner,
-  pattern: Url.Pattern | string,
+  given: Url.Pattern | string,
   handler: Route.Handler<E, R, P>,
   phase: P
 ): Effect.Effect<Route.Registration, Route.RouteError | Target.TargetGone | Deadline.Timeout, Scope.Scope | R> =>
@@ -242,7 +243,9 @@ export const register = <E, R, P extends Route.Phase>(
     const { id } = yield* Operation.record
     const adapter = owner.runtime.model.adapter
     const fail = (reason: Route.RouteErrorReason) =>
-      new Route.RouteError({ pattern: pattern as Url.Pattern, reason, diagnostics: Operation.diagnostics(id) })
+      new Route.RouteError({ pattern: given as Url.Pattern, reason, diagnostics: Operation.diagnostics(id) })
+    // A relative pattern resolves against the context's base URL, or the page's context's
+    const pattern = BaseUrl.pattern(given, BaseUrl.of(owner.routes))
     const matches = yield* Effect.try({
       try: () => UrlPattern.compile(pattern),
       catch: (error) =>
@@ -320,7 +323,7 @@ export const register = <E, R, P extends Route.Phase>(
     Operation.named(owner.operation, {
       attributes: {
         ...Spans.scopeAttributes(owner.scope),
-        "browser.route.pattern": pattern,
+        "browser.route.pattern": given,
         "browser.route.phase": phase
       }
     })

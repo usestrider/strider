@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect"
 import type * as BrowserWorker from "../BrowserWorker.ts"
 import type * as Page from "../Page.ts"
 import type * as UserContext from "../UserContext.ts"
+import * as BaseUrl from "./baseUrl.ts"
 import * as EventModule from "./eventModule.ts"
 import * as Filters from "./filters.ts"
 import * as Handles from "./handles.ts"
@@ -33,7 +34,7 @@ export const { history, next, stream } = EventModule.make<
       ))
       : Filters.requires(runtime, operation, `workers.${wanted}`)
     return checked.pipe(
-      Effect.andThen(Filters.url(operation, filter?.url)),
+      Effect.andThen(Filters.url(operation, filter?.url, BaseUrl.of(found.behind.entry))),
       Effect.map((matches) => ({
         channel: found.behind.entry.events.worker,
         accepts: (entry) =>

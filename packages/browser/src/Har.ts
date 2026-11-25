@@ -18,6 +18,7 @@ import * as Diagnostics from "./Diagnostics.ts"
 import type * as FilePath from "./FilePath.ts"
 import * as Access from "./internal/access.ts"
 import type * as Adapter from "./internal/adapter.ts"
+import * as BaseUrl from "./internal/baseUrl.ts"
 import * as Filters from "./internal/filters.ts"
 import * as Handles from "./internal/handles.ts"
 import * as HarImpl from "./internal/har.ts"
@@ -246,7 +247,7 @@ export const record = (
     let matches: (url: string) => boolean = () => true
     if (options.url !== undefined) {
       try {
-        matches = UrlPattern.compile(options.url)
+        matches = UrlPattern.compile(BaseUrl.pattern(options.url, BaseUrl.of(found.behind.entry)))
       } catch (error) {
         return yield* Effect.fail(fail(
           new Reason.InvalidInput({ input: "url", expected: "a URL pattern", hint: String(error) })

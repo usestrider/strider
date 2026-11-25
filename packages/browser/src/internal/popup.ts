@@ -8,6 +8,7 @@ import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Page from "../Page.ts"
 import type * as Popup from "../Popup.ts"
 import * as Reason from "../Reason.ts"
+import * as BaseUrl from "./baseUrl.ts"
 import * as EventModule from "./eventModule.ts"
 import type * as Events from "./events.ts"
 import * as Filters from "./filters.ts"
@@ -36,7 +37,7 @@ export const { history, next, stream } = EventModule.make<
     const behind = Handles.page(target)
     // A backend that can't say which page opened a page reports no popups (QUIRKS.md, Q212)
     return Filters.requires(behind.runtime, operation, "popups.opener").pipe(
-      Effect.andThen(Filters.url(operation, filter?.url)),
+      Effect.andThen(Filters.url(operation, filter?.url, BaseUrl.of(behind.entry))),
       Effect.map((matches) => ({
         channel: behind.entry.events.popup,
         accepts: accepts(matches),

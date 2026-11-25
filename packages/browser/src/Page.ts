@@ -942,6 +942,11 @@ export interface Page extends ReadonlyPage {
   /**
    * Navigates to `url`; returns at commit unless `waitUntil` asks for more.
    *
+   * **Details**
+   *
+   * A URL that isn't absolute, such as `"/cart"`, resolves against the context's `baseURL`, as a link in a page at
+   * the base would. Without a base it fails with `InvalidInput`.
+   *
    * **Example** (Opening the cart once it has loaded)
    *
    * ```ts import.meta.vitest

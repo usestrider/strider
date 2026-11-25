@@ -7,6 +7,7 @@ import type * as NetworkRequest from "../NetworkRequest.ts"
 import type * as NetworkRequestEnd from "../NetworkRequestEnd.ts"
 import type * as Page from "../Page.ts"
 import type * as UserContext from "../UserContext.ts"
+import * as BaseUrl from "./baseUrl.ts"
 import * as EventModule from "./eventModule.ts"
 import * as Filters from "./filters.ts"
 import * as Handles from "./handles.ts"
@@ -28,7 +29,7 @@ export const { history, next, stream } = EventModule.make<
     const method = Filters.among<string>(filter?.method)
     const resourceType = Filters.among(filter?.resourceType)
     const end = Filters.among<"finished" | "failed">(filter?.end)
-    return Effect.map(Filters.url(operation, filter?.url), (matches) => ({
+    return Effect.map(Filters.url(operation, filter?.url, BaseUrl.of(found.behind.entry)), (matches) => ({
       channel: found.behind.entry.events.requestEnd,
       accepts: (entry) => {
         const request = entry.value.hop.request

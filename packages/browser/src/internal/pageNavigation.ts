@@ -7,6 +7,7 @@ import * as Option from "effect/Option"
 import type * as Page from "../Page.ts"
 import type * as PageNavigation from "../PageNavigation.ts"
 import type * as UserContext from "../UserContext.ts"
+import * as BaseUrl from "./baseUrl.ts"
 import * as EventModule from "./eventModule.ts"
 import type * as Events from "./events.ts"
 import * as Filters from "./filters.ts"
@@ -33,7 +34,7 @@ export const { history, next, stream } = EventModule.make<
     const all = filter?.frames === "all"
     const waitUntil = filter?.waitUntil ?? "commit"
     const { model } = behind.runtime
-    return Effect.map(Filters.url(operation, filter?.url), (matches) => {
+    return Effect.map(Filters.url(operation, filter?.url, BaseUrl.of(behind.entry)), (matches) => {
       // A page's own navigations, not its frames', unless the filter takes all of them
       const ours = (entry: Events.Entry<Model.NavigationEvent>) => all || entry.value.frame === entry.value.page
       return {

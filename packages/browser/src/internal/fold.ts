@@ -63,7 +63,8 @@ const defaultSettings: Model.ContextSettings = {
   policy: Option.none(),
   eventLog: defaultEventLog,
   keyboardLayout: "us",
-  testIdAttribute: "data-testid"
+  testIdAttribute: "data-testid",
+  baseURL: undefined
 }
 
 /** How a target's end ends its event streams: normally when it was closed, or with `TargetGone` otherwise. */

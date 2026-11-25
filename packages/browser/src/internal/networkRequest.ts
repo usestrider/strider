@@ -12,6 +12,7 @@ import * as Subscription from "../Subscription.ts"
 import type * as Url from "../Url.ts"
 import * as Access from "./access.ts"
 import * as Adapter from "./adapter.ts"
+import * as BaseUrl from "./baseUrl.ts"
 import * as Events from "./events.ts"
 import type * as Model from "./model.ts"
 import * as Redaction from "./redaction.ts"
@@ -49,13 +50,16 @@ const plain = EventModule.make<
     const channel = Handles.target(target).behind.entry.events.request
     const method = Filters.among<string>(filter?.method)
     const resourceType = Filters.among(filter?.resourceType)
-    return Effect.map(Filters.url(operation, filter?.url), (matches) => ({
-      channel,
-      accepts: (entry) =>
-        Filters.urlMatches(matches, entry.value.url) && method(entry.value.method) &&
-        resourceType(entry.value.resourceType),
-      deliver: (request) => request
-    }))
+    return Effect.map(
+      Filters.url(operation, filter?.url, BaseUrl.of(Handles.target(target).behind.entry)),
+      (matches) => ({
+        channel,
+        accepts: (entry) =>
+          Filters.urlMatches(matches, entry.value.url) && method(entry.value.method) &&
+          resourceType(entry.value.resourceType),
+        deliver: (request) => request
+      })
+    )
   }
 })
 
@@ -243,7 +247,7 @@ const prepare = (target: Target, filter: BodyFilter, operation: string) => {
   const found = Handles.target(target)
   const method = Filters.among<string>(filter.method)
   const resourceType = Filters.among(filter.resourceType)
-  return Effect.map(Filters.url(operation, filter.url), (matches) => ({
+  return Effect.map(Filters.url(operation, filter.url, BaseUrl.of(found.behind.entry)), (matches) => ({
     found,
     channel: found.behind.entry.events.request,
     accepts: (entry: Events.Entry<NetworkRequest.NetworkRequest>) =>

@@ -10,6 +10,7 @@ import * as Option from "effect/Option"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as Reason from "../Reason.ts"
 import * as Subscription from "../Subscription.ts"
+import * as BaseUrl from "./baseUrl.ts"
 import * as Operation from "./operation.ts"
 import type * as Runtime from "./runtime.ts"
 import * as UrlPattern from "./urlPattern.ts"
@@ -30,14 +31,18 @@ export const unsupported = (operation: string, capability: string, backend: stri
     diagnostics: Operation.diagnosticsNow()
   })
 
-/** A URL filter, compiled; `None` for none. */
+/**
+ * A URL filter, compiled; `None` for none. A relative pattern resolves against the base URL of the context the
+ * subscription is on, or its page's.
+ */
 export const url = (
   operation: string,
   pattern: string | undefined,
+  base: string | undefined,
   input = "filter.url"
 ): Effect.Effect<Option.Option<(url: string) => boolean>, Subscription.SubscriptionError> =>
   pattern === undefined ? Effect.succeed(Option.none()) : Effect.try({
-    try: () => Option.some(UrlPattern.compile(pattern)),
+    try: () => Option.some(UrlPattern.compile(BaseUrl.pattern(pattern, base))),
     catch: (error) => invalid(operation, input, "a URL, a glob, or a URLPattern", String(error))
   })
 

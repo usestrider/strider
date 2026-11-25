@@ -51,6 +51,7 @@ import type * as Snapshot from "../Snapshot.ts"
 import type * as Target from "../Target.ts"
 import * as UncaughtException from "../UncaughtException.ts"
 import type * as UserContext from "../UserContext.ts"
+import * as BaseUrl from "./baseUrl.ts"
 import * as Devices from "./devices.ts"
 import * as Events from "./events.ts"
 import * as Handles from "./handles.ts"
@@ -697,8 +698,14 @@ export const makeSession = Effect.fnUntraced(function*(options: Options) {
         }
         const pages = yield* browserPages
         const listed = yield* Effect.forEach(pages, (page) => Effect.map(page.url, (at) => ({ page, at: String(at) })))
-        const matches = url === undefined ? undefined : UrlPattern.compile(url)
-        const found = listed.filter((each) => tab !== undefined ? String(each.page.id) === tab : matches!(each.at))
+        // A relative URL resolves against the base URL of each page's context
+        const matches = url === undefined
+          ? undefined
+          : (page: Page.ObservedPage, at: string) =>
+            UrlPattern.compile(BaseUrl.pattern(url, BaseUrl.of(Handles.page(page).entry)))(at)
+        const found = listed.filter((each) =>
+          tab !== undefined ? String(each.page.id) === tab : matches!(each.page, each.at)
+        )
         if (found.length !== 1) {
           return yield* Effect.fail(
             failed(

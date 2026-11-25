@@ -4,9 +4,15 @@
     "method:Browser.newPage"
   ],
   "option": "baseURL",
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding public option; the parent row does not imply option parity.",
+  "status": "has",
+  "api": [
+    {
+      "module": "UserContext",
+      "symbol": "Options",
+      "url": "/docs/api/browser/UserContext#Options"
+    }
+  ],
+  "notes": "Relative goto URLs, and URL patterns not starting with * or a scheme, resolve against it.",
   "capabilities": [],
   "requirements": []
 }

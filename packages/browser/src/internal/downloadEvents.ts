@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect"
 import type * as Download from "../Download.ts"
 import type * as Page from "../Page.ts"
 import type * as UserContext from "../UserContext.ts"
+import * as BaseUrl from "./baseUrl.ts"
 import * as EventModule from "./eventModule.ts"
 import * as Filters from "./filters.ts"
 import * as Handles from "./handles.ts"
@@ -23,7 +24,7 @@ export const { history, next, stream } = EventModule.make<
     const found = Handles.target(target)
     const runtime = found.behind.runtime
     return Filters.requires(runtime, operation, "downloads").pipe(
-      Effect.andThen(Filters.url(operation, filter?.url)),
+      Effect.andThen(Filters.url(operation, filter?.url, BaseUrl.of(found.behind.entry))),
       Effect.map((matches) => ({
         channel: found.behind.entry.events.download,
         accepts: (entry) => Filters.urlMatches(matches, entry.value.url),

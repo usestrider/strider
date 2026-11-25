@@ -19,11 +19,9 @@ import * as Equal from "effect/Equal"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Hash from "effect/Hash"
-import * as HttpUrl from "effect/http/Url"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import { pipeArguments } from "effect/Pipeable"
-import * as Result from "effect/Result"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type * as Deadline from "../Deadline.ts"
@@ -43,6 +41,7 @@ import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BaseUrl from "./baseUrl.ts"
 import * as Bindings from "./bindings.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as Capabilities from "./capabilities.ts"
@@ -497,19 +496,21 @@ export const make = (owner: PageOwner): Page.Page => {
     capability: (capability, options) => Capabilities.acquire(runtime, entry, capability, options, owner.grant),
     context: owner.context,
     goto: (url, options) => {
-      const result = HttpUrl.fromString(url)
-      if (Result.isFailure(result)) {
+      const base = BaseUrl.of(entry)
+      const parsed = BaseUrl.url(url, base)
+      if (parsed === undefined) {
         return Effect.fail(pageError(
           "Page.goto",
           new Reason.InvalidInput({
             input: "url",
-            expected: "an absolute URL",
-            hint: `${JSON.stringify(url)} doesn't parse`
+            expected: base === undefined ? "an absolute URL" : `a URL, absolute or relative to ${base}`,
+            hint: base === undefined
+              ? `${JSON.stringify(url)} doesn't parse; a context's baseURL would resolve a relative one`
+              : `${JSON.stringify(url)} doesn't parse`
           }),
           Operation.idNow()
         ))
       }
-      const parsed = result.success
       return navigateIn(
         self,
         "Page.goto",

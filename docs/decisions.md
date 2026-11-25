@@ -1918,3 +1918,18 @@ commits. One mechanism then serves all three browsers, and screenshots show the 
 only a page showing its actions waits before input. Compositing overlays into video frames in `VideoWriter` was
 rejected: Firefox writes its own video file, which no frame passes through, and screenshots would lack them.
 Playwright's deprecated `fontSize` option is not built; `style.title` sets the title's font like any other CSS.
+
+## A context's base URL resolves what its pages are given, in one place
+
+`UserContext.Options.baseURL` is the one base a context's relative input resolves against, with no default. `goto`
+on a page or a frame uses an absolute URL as given and resolves any other as a link at the base would (WHATWG: `/a`
+replaces the path, `a` its last segment). A URL pattern that starts with `*` or a scheme is used as given; any other
+resolves against the base with its `*`, `**`, and `URLPattern` syntax kept, and is then read as a glob, a
+`URLPattern`, or an exact URL as before. A WebSocket route's pattern resolves against the base with `http:` made
+`ws:` and `https:` made `wss:`. The rules live in one internal function that `goto`, routes, WebSocket routes, HAR
+recording's `url`, the toolkit, and every event filter call, so no operation resolves differently. This follows
+Playwright's rules except that a pattern with a scheme is never resolved, so an absolute pattern always means what it
+says. A per-page base was rejected: a page's routes, filters, and navigation would disagree with its context's, and
+the option belongs where the context's other settings are. Resolving inside the page, against its document's URL, was
+rejected: what a pattern matches would change as the page navigates, and a pattern given before any document has
+nothing to resolve against.

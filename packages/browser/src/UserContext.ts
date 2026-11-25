@@ -358,6 +358,10 @@ export interface UserContext extends ObservedUserContext {
    * or constructors saved before installation. Newest matching registration wins. WebKit and attached Chromium
    * require explicit bestEffort timing; Firefox refuses workers. Only dedicated workers started later are covered.
    *
+   * A pattern that doesn't start with `*` or a scheme resolves against the context's `baseURL`, with the base's
+   * `http:` made `ws:` and its `https:` made `wss:`: with a base of `http://localhost:3000/`, `"/socket"` routes
+   * `ws://localhost:3000/socket`.
+   *
    * **Example** (Echoing a mocked connection)
    *
    * ```ts import.meta.vitest
@@ -796,6 +800,38 @@ export interface Options {
    * @default "data-testid"
    */
   readonly testIdAttribute?: string | undefined
+  /**
+   * The URL that relative URLs and URL patterns given to the context and its pages resolve against.
+   *
+   * **Details**
+   *
+   * - `goto` resolves a URL that isn't absolute as a link in a page at the base would: `"/cart"` replaces the
+   *   base's path, and `"cart"` its last segment.
+   * - A URL pattern, as `route`, `routeWebSocket`, a HAR's `url` and event filters take, resolves against the base
+   *   unless it starts with `*` or a scheme, keeping its `*`, `**` and `:name` parts: with a base of
+   *   `http://localhost:3000/`, `"/api/**"` matches what `"http://localhost:3000/api/**"` would.
+   * - A WebSocket route's pattern takes the base's scheme as `ws:` for `http:`, and `wss:` for `https:`.
+   *
+   * A base that isn't an absolute URL fails with `InvalidInput`.
+   *
+   * **Example** (Navigating and routing against a local server)
+   *
+   * ```ts import.meta.vitest
+   * import { Browser, Route } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const cart = Effect.fn("cart")(function*() {
+   *   const context = yield* Browser.newContext({ baseURL: "http://localhost:3000/" })
+   *   const page = yield* context.newPage
+   *   yield* page.route("/analytics/**", () => Route.abort())
+   *   // Opens http://localhost:3000/cart
+   *   yield* page.goto("/cart")
+   * })
+   * ```
+   *
+   * @default undefined, which leaves a relative `goto` failing and patterns as given
+   */
+  readonly baseURL?: Url.Url | string | undefined
   /**
    * Events kept for `history`, per event module, for each page and for the context; 0 keeps none.
    *

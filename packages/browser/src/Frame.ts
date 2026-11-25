@@ -150,6 +150,7 @@ export interface Frame extends ReadonlyFrame {
    * For a child frame, the page's own document stays where it is; the page's top frame, from `page.frameById(page.id)`, navigates the page. A frame removed before then fails the navigation with `TargetGone`.
    * On WebKit the frame navigates by script, and a child frame's `waitUntil` other than `"commit"` fails with
    * `Unsupported`, since WebKit doesn't report its readiness.
+   * A URL that isn't absolute resolves against the context's `baseURL`, as `Page.goto`'s does.
    */
   goto(
     url: string,

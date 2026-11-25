@@ -640,6 +640,18 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
           id
         ))
       }
+      const baseURL = options?.baseURL === undefined ? undefined : URL.parse(options.baseURL)?.href
+      if (options?.baseURL !== undefined && baseURL === undefined) {
+        return yield* Effect.fail(contextError(
+          operation,
+          new Reason.InvalidInput({
+            input: "baseURL",
+            expected: "an absolute URL, such as \"http://localhost:3000/\"",
+            hint: `${JSON.stringify(options.baseURL)} doesn't parse as an absolute URL`
+          }),
+          id
+        ))
+      }
       const credentials = options?.httpCredentials
       if (
         credentials !== undefined && (typeof credentials.username !== "string" ||
@@ -871,7 +883,8 @@ export const make = Effect.fnUntraced(function*(model: Model.Model) {
         policy: adopt ? Option.none() : Option.some(options?.dialogs ?? "dismiss"),
         eventLog: options?.eventLog ?? settings.eventLog,
         keyboardLayout: options?.keyboardLayout ?? settings.keyboardLayout,
-        testIdAttribute: options?.testIdAttribute ?? settings.testIdAttribute
+        testIdAttribute: options?.testIdAttribute ?? settings.testIdAttribute,
+        baseURL: baseURL ?? settings.baseURL
       })
       const scope: Adapter.DeclarationScope = { _tag: "UserContext", context: created }
       // Set by the first of this scope's finalizers to run, below the declarations, ahead of their releases: the

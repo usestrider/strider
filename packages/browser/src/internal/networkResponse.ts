@@ -27,6 +27,7 @@ import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import * as Access from "./access.ts"
 import type * as Adapter from "./adapter.ts"
+import * as BaseUrl from "./baseUrl.ts"
 import * as BrowserClock from "./browserClock.ts"
 import * as EventModule from "./eventModule.ts"
 import * as Events from "./events.ts"
@@ -50,7 +51,7 @@ const subscription = (target: Target, filter: AnyFilter | undefined, operation: 
     const status = filter?.status
     const statusMatches = (code: NetworkResponse.StatusCode) =>
       status === undefined ? true : typeof status === "function" ? status(code) : code === status
-    return Effect.map(Filters.url(operation, filter?.url), (matches) => ({
+    return Effect.map(Filters.url(operation, filter?.url, BaseUrl.of(found.behind.entry)), (matches) => ({
       found,
       channel: found.behind.entry.events.response,
       accepts: (entry: Events.Entry<Model.ResponseEvent>) =>
