@@ -92,6 +92,7 @@ const methods: { readonly [K in Method]: K extends Release ? typeof release : Ki
   updateAuthenticator: write("updating the virtual authenticator"),
   cookies: read("the cookie read"),
   setCookies: write("setting the cookies"),
+  deleteCookies: write("deleting the cookies"),
   clearCookies: write("clearing the cookies"),
   grantPermissions: write("the grant"),
   resetPermissions: release,

@@ -29,7 +29,7 @@ import * as Browser from "../Browser.ts"
 import * as Protocol from "../protocol/Protocol.ts"
 import type * as Transport from "../protocol/Transport.ts"
 import * as L1Target from "../Target.ts"
-import type * as Adapter from "./adapter.ts"
+import * as Adapter from "./adapter.ts"
 import * as Kit from "./adapterKit.ts"
 import * as Capture from "./bidiAdapter/capture.ts"
 import * as Contexts from "./bidiAdapter/contexts.ts"
@@ -490,6 +490,7 @@ export const connect: (
         ),
       cookies: (context) => Storage.cookies(state, context),
       setCookies: (context, list) => Storage.setCookies(state, context, list),
+      deleteCookies: (context, list) => Storage.setCookies(state, context, Adapter.expired(list)),
       clearCookies: (context) => Storage.clearCookies(state, context),
       grantPermissions: (context, origin, permissions) => Storage.grantPermissions(state, context, origin, permissions),
       resetPermissions: (context) => Storage.resetPermissions(state, context),

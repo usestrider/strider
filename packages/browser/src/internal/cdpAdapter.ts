@@ -23,7 +23,7 @@ import * as Target from "../cdp/Target.ts"
 import * as Protocol from "../protocol/Protocol.ts"
 import type * as Transport from "../protocol/Transport.ts"
 import * as VideoWriter from "../VideoWriter.ts"
-import type * as Adapter from "./adapter.ts"
+import * as Adapter from "./adapter.ts"
 import * as Kit from "./adapterKit.ts"
 import * as Capture from "./cdpAdapter/capture.ts"
 import * as Claims from "./cdpAdapter/claims.ts"
@@ -432,6 +432,7 @@ export const connect: (
       updateAuthenticator: (ref, update) => WebAuthn.update(state, ref, update),
       cookies: (context) => Storage.cookies(state, context),
       setCookies: (context, list) => Storage.setCookies(state, context, list),
+      deleteCookies: (context, list) => Storage.setCookies(state, context, Adapter.expired(list)),
       clearCookies: (context) => Storage.clearCookies(state, context),
       grantPermissions: (context, origin, permissions) => Storage.grantPermissions(state, context, origin, permissions),
       resetPermissions: (context) => Storage.resetPermissions(state, context),

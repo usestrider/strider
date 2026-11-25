@@ -106,6 +106,19 @@ const entry = (
   limitations: [...limitations]
 })
 
+/**
+ * Whether two cookies are the same cookie: one per name, domain, path, and partition, a partition's absent cross-site
+ * bit read as false, as Chromium sets it.
+ */
+const sameCookie = (a: Adapter.Cookie, b: Adapter.Cookie) => {
+  const partition = (cookie: Adapter.Cookie) =>
+    Option.match(cookie.partitionKey, {
+      onNone: () => undefined,
+      onSome: (key) => `${key.topLevelSite} ${Option.getOrElse(key.crossSiteAncestor, () => false)}`
+    })
+  return a.name === b.name && a.domain === b.domain && a.path === b.path && partition(a) === partition(b)
+}
+
 /** What the fake can do, as `Browser.layerTest` makes its `CapabilitySet` of. */
 export const capabilities: ReadonlyArray<Browser.CapabilityEntry> = [
   entry("userContexts", "supported"),
@@ -431,26 +444,20 @@ export const connect = (
       cookies: (context) => Effect.succeed(cookies.get(context) ?? []),
       setCookies: (context, added) =>
         // Expiry is read on Effect's clock, which the timeline runs on, so under `TestClock` it moves only as the test
-        // adjusts it
+        // adjusts it; a cookie set to expire in the past is removed
         Effect.map(Clock.currentTimeMillis, (millis) => {
-          // A cookie is one per name, domain, path, and partition, a partition's absent cross-site bit is false, as
-          // Chromium sets it, and one set to expire in the past is removed
-          const partition = (cookie: Adapter.Cookie) =>
-            Option.match(cookie.partitionKey, {
-              onNone: () => undefined,
-              onSome: (key) => `${key.topLevelSite} ${Option.getOrElse(key.crossSiteAncestor, () => false)}`
-            })
-          const kept = (cookies.get(context) ?? []).filter((cookie) =>
-            !added.some((each) =>
-              each.name === cookie.name && each.domain === cookie.domain && each.path === cookie.path &&
-              partition(each) === partition(cookie)
-            )
-          )
           const now = millis / 1000
           cookies.set(context, [
-            ...kept,
+            ...(cookies.get(context) ?? []).filter((cookie) => !added.some((each) => sameCookie(each, cookie))),
             ...added.filter((cookie) => Option.isNone(cookie.expires) || cookie.expires.value > now)
           ])
+        }),
+      deleteCookies: (context, deleted) =>
+        Effect.sync(() => {
+          cookies.set(
+            context,
+            (cookies.get(context) ?? []).filter((cookie) => !deleted.some((each) => sameCookie(each, cookie)))
+          )
         }),
       clearCookies: (context) => Effect.sync(() => void cookies.delete(context)),
       grantPermissions: () => Effect.void,

@@ -219,6 +219,7 @@ export const connect: (
         ),
       cookies: (context) => Storage.cookiesAttached(state, context),
       setCookies: (context, list) => Storage.setCookiesAttached(state, context, list),
+      deleteCookies: (context, list) => Storage.setCookiesAttached(state, context, Adapter.expired(list)),
       clearCookies: (context) => Storage.clearCookiesAttached(state, context),
       grantPermissions: refuse("permissions", "stock WebKit's inspector has no Emulation domain"),
       resetPermissions: refuse("permissions", "stock WebKit's inspector has no Emulation domain"),
@@ -254,6 +255,7 @@ export const connect: (
       dispatchInput: (page, events) => Input.dispatchInputLaunched(state, page, events),
       cookies: (context) => Storage.cookiesLaunched(state, context),
       setCookies: (context, list) => Storage.setCookiesLaunched(state, context, list),
+      deleteCookies: (context, list) => Storage.setCookiesLaunched(state, context, Adapter.expired(list)),
       clearCookies: (context, options) => Storage.clearCookiesLaunched(state, context, options),
       setInputFiles: (node, files) => Input.setInputFilesLaunched(state, node, files),
       contentFrame: (node) => Input.contentFrameLaunched(state, node)

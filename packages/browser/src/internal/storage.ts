@@ -5,8 +5,8 @@
  *
  * - **A cookie's `sameSite`** is `None` where the cookie didn't say, since the browsers' defaults differ; WebKit
  *   reports `Lax` for it. `priority` is Chromium's alone, and only CDP reports a partition.
- * - **`remove`** reads the jar, filters it by the match, and sets each cookie that matches again, in its own
- *   partition, with an expiry in the past, which every backend removes.
+ * - **`remove`** reads the jar, filters it by the match, and has the adapter delete each cookie that matches, in its
+ *   own partition: a browser by setting it again with an expiry in the past, the test backend by dropping it.
  * - **`listFor`** filters the context's cookies as a top-level request to the URL would send them: by domain, path,
  *   `Secure` and expiry, and a partitioned cookie only in its own top-level site. `Secure` admits an `https:` or `wss:`
  *   URL, and any URL to a local host, as the browsers do: `localhost`, a host under it, either with a final dot,
@@ -275,11 +275,9 @@ export const cookieJar = (
         (match.partitionKey === undefined || samePartition(match.partitionKey, cookie.partitionKey))
       )
       if (matching.length === 0) return
-      // An expiry in the past removes it on every backend
-      yield* adapter.setCookies(
-        context,
-        matching.map((cookie) => ({ ...cookie, value: Redacted.make(""), expires: Option.some(1) }))
-      ).pipe(Effect.mapError(cookieFailure(runtime, "CookieJar.remove", id)))
+      yield* adapter.deleteCookies(context, matching).pipe(
+        Effect.mapError(cookieFailure(runtime, "CookieJar.remove", id))
+      )
     }),
     get clear() {
       return Effect.flatMap(

@@ -17,8 +17,8 @@
 import * as Data from "effect/Data"
 import type * as Effect from "effect/Effect"
 import type * as Headers from "effect/http/Headers"
-import type * as Option from "effect/Option"
-import type * as Redacted from "effect/Redacted"
+import * as Option from "effect/Option"
+import * as Redacted from "effect/Redacted"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as SubscriptionRef from "effect/SubscriptionRef"
@@ -1196,6 +1196,11 @@ export interface AdapterConnection {
   readonly updateAuthenticator: (ref: Authenticator, update: AuthenticatorUpdate) => Effect.Effect<void, AdapterError>
   readonly cookies: (context: UserContext.Id) => Effect.Effect<ReadonlyArray<Cookie>, AdapterError>
   readonly setCookies: (context: UserContext.Id, cookies: ReadonlyArray<Cookie>) => Effect.Effect<void, AdapterError>
+  /** Deletes these cookies, each the one of its name, domain, path, and partition. */
+  readonly deleteCookies: (
+    context: UserContext.Id,
+    cookies: ReadonlyArray<Cookie>
+  ) => Effect.Effect<void, AdapterError>
   readonly clearCookies: (
     context: UserContext.Id,
     options?: { readonly page: Target.NavigableId }
@@ -1266,3 +1271,10 @@ export interface VideoOptions {
   /** Where the file goes in place of the context's downloads directory, or the backend's own. */
   readonly directory: Option.Option<string>
 }
+
+/**
+ * Cookies as a browser deletes them: each set again, in its own partition, with an empty value and an expiry at the
+ * epoch's first second, which is in the past on a browser's wall clock.
+ */
+export const expired = (cookies: ReadonlyArray<Cookie>): ReadonlyArray<Cookie> =>
+  cookies.map((cookie) => ({ ...cookie, value: Redacted.make(""), expires: Option.some(1) }))
