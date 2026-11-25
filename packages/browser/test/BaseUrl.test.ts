@@ -72,6 +72,34 @@ describe("A relative URL pattern", () => {
     assert.strictEqual(BaseUrl.pattern("//%7Aq0zq.example/*", base), "http://zq0zq.example/*")
   })
 
+  it("does not turn a percent-encoded literal host into a wildcard", () => {
+    const input = "//%2A.example/a"
+    const other = "http://other.example/a"
+    assert.isFalse(UrlPattern.compile(`http:${input}`)(other))
+    assert.isFalse(UrlPattern.compile(BaseUrl.pattern(input, base))(other))
+  })
+
+  it("does not turn a Unicode literal host into a wildcard", () => {
+    const input = "//＊.example/a"
+    const other = "http://other.example/a"
+    assert.isFalse(UrlPattern.compile(`http:${input}`)(other))
+    assert.isFalse(UrlPattern.compile(BaseUrl.pattern(input, base))(other))
+  })
+
+  it("keeps parent segments within the path and leaves backslashes as pattern text", () => {
+    assert.strictEqual(BaseUrl.pattern("//other.example/../../a/**", base), "http://other.example/a/**")
+    assert.strictEqual(BaseUrl.pattern("/a/../../**", base), "http://127.0.0.1:8080/**")
+    assert.strictEqual(BaseUrl.pattern("a\\b/**", base), "http://127.0.0.1:8080/app/a\\b/**")
+  })
+
+  it("joins patterns to a file base's scheme, empty host and path", () => {
+    const file = "file:///tmp/app/index.html?q=1#f"
+    assert.strictEqual(BaseUrl.pattern("/assets/**", file), "file:///assets/**")
+    assert.strictEqual(BaseUrl.pattern("../assets/**", file), "file:///tmp/assets/**")
+    assert.strictEqual(BaseUrl.pattern("../../../assets/**", file), "file:///assets/**")
+    assert.strictEqual(BaseUrl.pattern("", file), "file:///tmp/app/index.html?q=1")
+  })
+
   it("joins each form of relative pattern to the part of the base it replaces", () => {
     const withQuery = "http://127.0.0.1:8080/app/index.html?x=1#f"
     for (
