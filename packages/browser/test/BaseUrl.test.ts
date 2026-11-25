@@ -49,7 +49,9 @@ describe("A relative URL pattern", () => {
   })
 
   it("is unchanged without a base", () => {
-    for (const pattern of ["/api/**", "/products/:id", "a"]) assert.strictEqual(BaseUrl.pattern(pattern, undefined), pattern)
+    for (const pattern of ["/api/**", "/products/:id", "a"]) {
+      assert.strictEqual(BaseUrl.pattern(pattern, undefined), pattern)
+    }
   })
 
   it("takes a WebSocket scheme from the base's for a WebSocket route", () => {

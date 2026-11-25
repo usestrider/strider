@@ -51,7 +51,11 @@ const setup = (body: unknown, grant: Option.Option<Access.Grant> = Option.none()
   }
   Handles.registerPage(page, {
     grant,
-    entry: { id: "page" as Target.NavigableId, events: { request: channel } } as Model.PageEntry,
+    entry: {
+      id: "page" as Target.NavigableId,
+      events: { request: channel },
+      contextEntry: { state: { getUnsafe: () => ({ settings: { baseURL: undefined } }) } }
+    } as unknown as Model.PageEntry,
     runtime: { backend: "test", model: { adapter } } as unknown as Runtime.Runtime
   })
   return { page, channel, declarations, reads: () => reads, released: () => released }

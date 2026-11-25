@@ -33,7 +33,7 @@ export const baseUrl = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           const page = yield* context.newPage
           yield* page.goto("/top")
           assert.strictEqual(yield* page.url, `${origin}/top`)
-          yield* page.goto("nested")
+          yield* page.goto("nested", { waitUntil: "load" })
           assert.strictEqual(yield* page.evaluateInMainWorld(() => document.title), "/app/nested")
         }).pipe(Effect.scoped), timeout)
 
@@ -43,35 +43,44 @@ export const baseUrl = (name: string, backend: Layer.Layer<Browser.Browser, unkn
           const page = yield* context.newPage
           yield* page.route("/api/**", () =>
             Route.fulfill(HttpServerResponse.text("<title>routed</title>", { contentType: "text/html" })))
-          yield* page.goto("/api/items")
-          assert.strictEqual(yield* page.evaluateInMainWorld(() => document.title), "routed")
+          yield* page.goto("/api/items", { waitUntil: "load" })
+          assert.strictEqual(
+            yield* page.evaluateInMainWorld(() =>
+              document.title
+            ),
+            "routed"
+          )
         }).pipe(Effect.scoped), timeout)
 
-      it.effect("routes a WebSocket by a relative pattern, with the base's scheme made ws:", () =>
-        Effect.gen(function*() {
-          const { context } = yield* Based
-          const page = yield* context.newPage
-          yield* page.goto("/socket-page")
-          yield* context.routeWebSocket(
-            "/socket",
-            (connection) =>
-              connection.open({ fromPage: (_, endpoint) => endpoint.send({ _tag: "Text", data: "routed" }) }),
-            { implementation: "script", timing: "bestEffort" }
-          )
-          const reply = yield* page.evaluateInMainWorld(() =>
-            new Promise<string>((resolve) => {
-              const socket = new WebSocket(`${location.origin.replace("http:", "ws:")}/socket`)
-              socket.onopen = () => socket.send("ping")
-              socket.onmessage = (event) => {
-                resolve(String(event.data))
-                socket.close()
-              }
-              socket.onerror = () => resolve("socket error")
-              setTimeout(() => resolve("no reply"), 5_000)
-            })
-          )
-          assert.strictEqual(reply, "routed")
-        }).pipe(Effect.scoped), timeout)
+      it.effect(
+        "routes a WebSocket by a relative pattern, with the base's scheme made ws:",
+        () =>
+          Effect.gen(function*() {
+            const { context } = yield* Based
+            const page = yield* context.newPage
+            yield* page.goto("/socket-page", { waitUntil: "load" })
+            yield* context.routeWebSocket(
+              "/socket",
+              (connection) =>
+                connection.open({ fromPage: (_, endpoint) => endpoint.send({ _tag: "Text", data: "routed" }) }),
+              { implementation: "script", timing: "bestEffort" }
+            )
+            const reply = yield* page.evaluateInMainWorld(() =>
+              new Promise<string>((resolve) => {
+                const socket = new WebSocket(`${location.origin.replace("http:", "ws:")}/socket`)
+                socket.onopen = () => socket.send("ping")
+                socket.onmessage = (event) => {
+                  resolve(String(event.data))
+                  socket.close()
+                }
+                socket.onerror = () => resolve("socket error")
+                setTimeout(() => resolve("no reply"), 5_000)
+              })
+            )
+            assert.strictEqual(reply, "routed")
+          }).pipe(Effect.scoped),
+        timeout
+      )
 
       it.effect("filters events by a relative URL pattern", () =>
         Effect.gen(function*() {

@@ -47,7 +47,11 @@ const setup = (
   }
   Handles.registerPage(page, {
     grant,
-    entry: { id: "page" as Target.NavigableId, events: { response: channel } } as Model.PageEntry,
+    entry: {
+      id: "page" as Target.NavigableId,
+      events: { response: channel },
+      contextEntry: { state: { getUnsafe: () => ({ settings: { baseURL: undefined } }) } }
+    } as unknown as Model.PageEntry,
     runtime: { backend: "test", model: { adapter } } as unknown as Runtime.Runtime
   })
   const publish = Effect.gen(function*() {
