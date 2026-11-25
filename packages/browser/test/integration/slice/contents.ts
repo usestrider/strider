@@ -3771,6 +3771,87 @@ export const contents = (
           }))
         }), timeout)
 
+      it.effect("hides a focused field's caret in every capture by default", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<!DOCTYPE html><body style="margin:0;background:white"><div id="field" contenteditable style="margin:10px;width:80px;height:40px;font-size:32px;line-height:40px;outline:none;caret-color:rgb(255,0,0)"></div></body>`
+              ),
+              { waitUntil: "load" }
+            )
+            yield* page.locator("#field").focus
+            const ratio = yield* page.evaluateInMainWorld(() => devicePixelRatio)
+            // Each capture of the field's box, a blink apart, so a caret that shows in any of them is seen
+            for (let i = 0; i < 6; i++) {
+              const png = yield* page.screenshot()
+              const red = pngRegion(png, { x: 10 * ratio, y: 10 * ratio, width: 80 * ratio, height: 40 * ratio })
+                .filter(([r, g, b]) => r! > 200 && g! < 80 && b! < 80)
+              assert.strictEqual(red.length, 0, `capture ${i} shows the caret`)
+              yield* page.evaluateInMainWorld(() => new Promise<void>((resolve) => setTimeout(resolve, 150)))
+            }
+          }))
+        }), timeout)
+
+      it.effect("applies a capture's style in every frame for that capture alone", () =>
+        Effect.gen(function*() {
+          const { crossSite, origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<!DOCTYPE html><body style="margin:0;background:white"><iframe id="frame" style="display:block;margin-top:60px;border:0;width:200px;height:100px" src="${
+                  fixtureUrl(crossSite, `<!DOCTYPE html><body style="margin:0;background:white"><p>inner</p></body>`)
+                }"></iframe></body>`
+              ),
+              { waitUntil: "load" }
+            )
+            yield* page.frame(page.locator("#frame")).locator("p").pipe(Expect.toBeVisible)
+            const ratio = yield* page.evaluateInMainWorld(() => devicePixelRatio)
+            const at = (png: Uint8Array, x: number, y: number) =>
+              pngRegion(png, { x: x * ratio, y: y * ratio, width: 1, height: 1 })[0]
+            const styled = yield* page.screenshot({ style: "body { background: rgb(0,255,0) !important }" })
+            assert.deepStrictEqual(at(styled, 150, 20), [0, 255, 0, 255])
+            assert.deepStrictEqual(at(styled, 150, 140), [0, 255, 0, 255])
+            const after = yield* page.screenshot()
+            assert.deepStrictEqual(at(after, 150, 20), [255, 255, 255, 255])
+            assert.deepStrictEqual(at(after, 150, 140), [255, 255, 255, 255])
+          }))
+        }), timeout)
+
+      it.effect("leaves no stylesheet in a document or shadow root once a styled capture ends", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            yield* page.goto(
+              fixtureUrl(
+                origin,
+                `<!DOCTYPE html><body><div id="host"></div><iframe srcdoc="<p>child</p>"></iframe><script>document.getElementById("host").attachShadow({ mode: "open" }).innerHTML = "<input>"</script></body>`
+              ),
+              { waitUntil: "load" }
+            )
+            const sheets = page.evaluateInMainWorld(() => {
+              const host = document.getElementById("host")!
+              const child = document.querySelector("iframe")!.contentDocument!
+              return [
+                document.adoptedStyleSheets.length + document.styleSheets.length,
+                host.shadowRoot!.adoptedStyleSheets.length + host.shadowRoot!.styleSheets.length,
+                child.adoptedStyleSheets.length + child.styleSheets.length
+              ]
+            })
+            const before = yield* sheets
+            const html = yield* page.readHtml
+            yield* page.screenshot({ style: "p { color: red }" })
+            assert.deepStrictEqual(yield* sheets, before)
+            assert.strictEqual(yield* page.readHtml, html)
+          }))
+        }), timeout)
+
       it.effect("prints a PDF where the backend can, and reads the document's HTML", () =>
         Effect.gen(function*() {
           const { origin } = yield* site
