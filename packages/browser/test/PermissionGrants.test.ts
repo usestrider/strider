@@ -173,3 +173,56 @@ it.effect("leaves no permission when its scope is already closed", () =>
       assert.strictEqual(settings.size, 0, "replay must not restore the closed declaration")
     }).pipe(Effect.provide(layer))
   }))
+
+it.effect("leaves no permission when its scope closes while the call waits for the permit", () =>
+  Effect.gen(function*() {
+    const entered = yield* Deferred.make<void>()
+    const resume = yield* Deferred.make<void>()
+    const clock = yield* Clock.clockWith(Effect.succeed)
+    const settings = new Map<string, string>()
+    let hold = true
+    const layer = BrowserImpl.layer((sink) =>
+      Effect.map(
+        Fake.connect([], {
+          info: new Browser.Info(Fake.info),
+          capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+        })(sink),
+        (fake) => ({
+          ...fake,
+          grantPermissions: Effect.fnUntraced(function*(_context, _origin, names, setting) {
+            if (hold) {
+              hold = false
+              yield* Deferred.succeed(entered, undefined)
+              yield* Deferred.await(resume)
+            }
+            for (const name of names) settings.set(name, setting)
+          }),
+          resetPermissions: () => Effect.sync(() => settings.clear())
+        })
+      )
+    ).pipe(Layer.provideMerge(Layer.succeed(BrowserClock.CurrentClock, BrowserClock.fromClock(clock))))
+    yield* Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      // This call holds the permit until its send resumes.
+      const holding = yield* context.grant(["geolocation"]).pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
+      const owner = yield* Scope.make()
+      const waiting = yield* context.deny(["notifications"]).pipe(Scope.provide(owner), Effect.forkDetach)
+      yield* TestClock.adjust("1 millis")
+      assert.strictEqual(waiting.pollUnsafe(), undefined, "the call must wait for the permit")
+      const closing = yield* Scope.close(owner, Exit.void).pipe(Effect.forkDetach)
+      yield* TestClock.adjust("1 millis")
+      assert.strictEqual(closing.pollUnsafe(), undefined, "closing the scope must wait for the permit")
+      yield* Deferred.succeed(resume, undefined)
+      yield* Fiber.join(holding)
+      yield* Fiber.join(closing)
+      const registration = yield* Fiber.join(waiting)
+      yield* registration.remove
+      assert.isFalse(settings.has("notifications"), "the closed scope must leave no permission behind")
+      assert.strictEqual(settings.get("geolocation"), "granted", "the other call's grant stays in force")
+      const next = yield* context.grant([])
+      yield* next.remove
+      assert.isFalse(settings.has("notifications"), "replay must not restore the closed declaration")
+      assert.strictEqual(settings.get("geolocation"), "granted")
+    }).pipe(Effect.provide(layer))
+  }))
