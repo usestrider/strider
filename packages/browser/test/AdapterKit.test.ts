@@ -398,3 +398,30 @@ describe("consoleMethod", () => {
     assert.strictEqual(Kit.consoleMethod(undefined), "log")
   })
 })
+
+describe("browser close and scope release", () => {
+  it.effect("keeps the scope's closing reason when an earlier close is refused", () =>
+    Effect.gen(function*() {
+      const ending: Kit.Ending = {}
+      const sent = yield* Deferred.make<void>()
+      const refuse = yield* Deferred.make<void>()
+      const close = yield* Kit.closeBrowser(
+        ending,
+        Deferred.succeed(sent, undefined).pipe(
+          Effect.andThen(Deferred.await(refuse)),
+          Effect.andThen(Effect.fail(
+            new Protocol.ProtocolError({
+              reason: new Protocol.Unsupported({ method: "Browser.close" })
+            })
+          ))
+        ),
+        Effect.never
+      ).pipe(Effect.exit, Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(sent)
+      // Scope release marks the same adapter closing while the explicit command is pending.
+      yield* Kit.closing(ending)(new Target.BrowserClosed({}))
+      yield* Deferred.succeed(refuse, undefined)
+      assert.isTrue(Exit.isFailure(yield* Fiber.join(close)))
+      assert.strictEqual(Kit.closed(ending)._tag, "BrowserClosed")
+    }))
+})

@@ -8,9 +8,13 @@ import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
+import * as fs from "node:fs"
 import * as http from "node:http"
-import type * as net from "node:net"
+import * as https from "node:https"
+import * as net from "node:net"
+import * as tls from "node:tls"
 import * as Browser from "../src/Browser.ts"
+import * as Attach from "../src/internal/cli/attach.ts"
 import * as Connect from "../src/internal/connect.ts"
 import * as ProxyHttpClient from "../src/internal/proxyHttpClient.ts"
 
@@ -133,5 +137,107 @@ describe("NO_PROXY matching", () => {
     assert.isFalse(matches("browser.test:9333", "http://browser.test:9222"))
     assert.isTrue(matches("*", "http://anything:1"))
     assert.isFalse(matches("", "http://browser.test"))
+  })
+})
+
+describe("HTTPS proxy tunnels", () => {
+  it("discovers through a successful tunnel with a trusted certificate", async () => {
+    const fixture = (name: string) =>
+      fs.readFileSync(new URL(`./fixtures/client-certificates/${name}`, import.meta.url))
+    const previous = tls.getCACertificates("default")
+    tls.setDefaultCACertificates([...previous, fixture("ca.pem").toString()])
+    const sockets = new Set<net.Socket>()
+    const track = (socket: net.Socket) => {
+      sockets.add(socket)
+      socket.on("close", () => sockets.delete(socket))
+    }
+    const target = https.createServer(
+      { key: fixture("server-key.pem"), cert: fixture("server.pem") },
+      version("ws://localhost/devtools/browser/tunneled")
+    )
+    const direct = https.createServer(
+      { key: fixture("server-key.pem"), cert: fixture("server.pem") },
+      version("ws://localhost/devtools/browser/direct")
+    )
+    const proxy = http.createServer()
+    direct.on("connection", track)
+    target.on("connection", track)
+    proxy.on("connection", track)
+    const listen = (server: http.Server | https.Server) =>
+      new Promise<number>((done) =>
+        server.listen(0, "127.0.0.1", () => done((server.address() as net.AddressInfo).port))
+      )
+    try {
+      const targetPort = await listen(target)
+      const directPort = await listen(direct)
+      const proxyPort = await listen(proxy)
+      const seen: Array<string> = []
+      proxy.on("connect", (request, socket, head) => {
+        seen.push(request.url!)
+        const upstream = net.connect(targetPort, "127.0.0.1", () => {
+          socket.write("HTTP/1.1 200 Connection Established\r\n\r\n")
+          upstream.write(head)
+          socket.pipe(upstream).pipe(socket)
+        })
+        track(upstream)
+      })
+      // The proxy routes the authority to a different browser; bypassing it returns the wrong endpoint.
+      const result = await Effect.runPromise(resolve(`https://localhost:${directPort}`, {
+        HTTPS_PROXY: `http://127.0.0.1:${proxyPort}`
+      }))
+      assert.strictEqual(result, "ws://localhost/devtools/browser/tunneled")
+      assert.deepStrictEqual(seen, [`localhost:${directPort}`])
+    } finally {
+      tls.setDefaultCACertificates(previous)
+      for (const socket of sockets) socket.destroy()
+      await Promise.all(
+        [target, direct, proxy].map((server) => new Promise<void>((done) => server.close(() => done())))
+      )
+    }
+  })
+})
+
+describe("proxy discovery response handling", () => {
+  it.live("rejects an oversized CLI discovery body before the response ends", () =>
+    Effect.gen(function*() {
+      const proxy = yield* serve((_request, response) => {
+        response.writeHead(200, { "content-type": "application/json" })
+        response.write(Buffer.alloc(65537, " "))
+      })
+      const error = yield* Attach.detect("http://browser.test:9222").pipe(
+        Effect.provide(ProxyHttpClient.layer),
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
+          env: {
+            HTTP_PROXY: `http://127.0.0.1:${proxy.port}`
+          }
+        }))),
+        Effect.flip
+      )
+      assert.include(error.message, "exceeds 65536 bytes")
+    }).pipe(Effect.scoped), 10_000)
+
+  it.live("follows discovery redirects through the proxy as direct discovery does", () =>
+    Effect.gen(function*() {
+      const proxy = yield* serve((request, response) => {
+        if (request.url?.endsWith("/json/version")) {
+          response.writeHead(302, { location: "http://browser.test:9222/version" })
+          response.end()
+        } else {
+          version("ws://browser.test:9222/devtools/browser/redirected")(request, response)
+        }
+      })
+      const result = yield* resolve("http://browser.test:9222", {
+        HTTP_PROXY: `http://127.0.0.1:${proxy.port}`
+      })
+      assert.strictEqual(result, "ws://browser.test:9222/devtools/browser/redirected")
+    }).pipe(Effect.scoped))
+})
+
+describe("NO_PROXY compatibility", () => {
+  it("a leading dot matches subdomains, not the bare domain", () => {
+    assert.isFalse(ProxyHttpClient.bypasses(".browser.test", new URL("http://browser.test")))
+  })
+  it("a leading wildcard matches a hostname suffix without requiring a dot", () => {
+    assert.isTrue(ProxyHttpClient.bypasses("*browser.test", new URL("http://mybrowser.test")))
   })
 })
