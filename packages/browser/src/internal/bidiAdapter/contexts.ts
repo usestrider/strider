@@ -405,7 +405,15 @@ const openBlank = (state: State, page: BrowsingContext.BrowsingContext) =>
   Effect.suspend(() => {
     const windows = Windows.of(state)
     windows.pending++
-    return state.send(BrowsingContext.create({ type: "tab", referenceContext: page, background: true })).pipe(
+    return state.send(
+      BrowsingContext.create({
+        type: "tab",
+        referenceContext: page,
+        background: true,
+        // Firefox puts a tab in its reference context's user context unless told otherwise
+        userContext: "default" as BrowserBidi.UserContext
+      })
+    ).pipe(
       Effect.tap((created) => Effect.sync(() => windows.blanks.add(created.context))),
       Effect.ensuring(Effect.sync(() => {
         windows.pending--
