@@ -72,6 +72,20 @@ describe("A relative URL pattern", () => {
     assert.strictEqual(BaseUrl.pattern("//%7Aq0zq.example/*", base), "http://zq0zq.example/*")
   })
 
+  it("joins each form of relative pattern to the part of the base it replaces", () => {
+    const withQuery = "http://127.0.0.1:8080/app/index.html?x=1#f"
+    for (
+      const [pattern, resolved] of [
+        ["./x", "http://127.0.0.1:8080/app/x"],
+        ["../../../x/**", "http://127.0.0.1:8080/x/**"],
+        ["?q=*", "http://127.0.0.1:8080/app/index.html?q=*"],
+        ["#f*", "http://127.0.0.1:8080/app/index.html?x=1#f*"],
+        ["", "http://127.0.0.1:8080/app/index.html?x=1"],
+        ["//*.example/**", "http://*.example/**"]
+      ] as const
+    ) assert.strictEqual(BaseUrl.pattern(pattern, withQuery), resolved, pattern)
+  })
+
   it("removes a wildcard segment followed by a parent segment", () => {
     assert.strictEqual(BaseUrl.pattern("/a/*/../b", base), "http://127.0.0.1:8080/a/b")
   })
