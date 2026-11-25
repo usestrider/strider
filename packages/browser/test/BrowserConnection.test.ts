@@ -97,3 +97,28 @@ describe("Browser close deadlines", () => {
       }))))
     }))
 })
+
+describe("Browser close after disconnection", () => {
+  it.effect("does nothing after disconnection even if the backend cannot close browsers", () =>
+    Effect.gen(function*() {
+      const finish = yield* Deferred.make<void>()
+      yield* Effect.gen(function*() {
+        const browser = yield* Browser.Browser
+        yield* Deferred.succeed(finish, undefined)
+        yield* browser.closed
+        assert.isFalse(yield* browser.isConnected)
+        yield* browser.close
+      }).pipe(Effect.provide(layer((fake) => ({
+        closed: Deferred.await(finish).pipe(
+          Effect.andThen(fake.closeBrowser().pipe(Effect.orDie)),
+          Effect.andThen(fake.closed)
+        ),
+        closeBrowser: () =>
+          Effect.fail(
+            new Adapter.AdapterError({
+              reason: { _tag: "Unsupported", capability: "browser.close", hint: "no browser close command" }
+            })
+          )
+      }))))
+    }))
+})
