@@ -37,7 +37,10 @@ principles produces it:
 - Lazy locators: a held element goes stale, a query doesn't.
 - Strictness: ambiguity fails at once instead of picking an element.
 - Actionability checks are named, adjustable per call, and reported in errors.
-- Retrying expectations: a retry has a name and is asked for in code.
+- Retrying expectations: a retry has a name and is asked for in code. When an expectation checks again is set one
+  way, `Expect.withChecks`: on a page's animation frames, on its DOM mutations, or at an interval (100 ms unless
+  set), rather than an interval setting with page strategies beside it, or a second wait that loops a function in
+  the page.
 - Contexts and storage state: isolation per user context is a spec concept, and export is deliberate.
 - Routes: an intercepted request gets exactly one decision.
 - Init scripts: declarations with stated timing.

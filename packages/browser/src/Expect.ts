@@ -1313,8 +1313,6 @@ export const Checks: {
  * - Set it with `withChecks`, which checks an interval: one provided here directly isn't checked, and a
  *   non-positive or non-finite one is a defect.
  *
- * @default Checks.interval("100 millis")
- *
  * @stability unstable
  * @category references
  * @since 0.1.0

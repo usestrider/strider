@@ -263,8 +263,8 @@ const loaded = Effect.fn("loaded")(function*(page: Page.Page) {
 ```
 
 Assigning a property is no change the page reports, so instead of waiting on page events it reads the property
-again every `Expect.CheckInterval`, 100 ms unless `Expect.withCheckInterval` sets it. The interval is also how
-often a getter of the page's on the path runs.
+again every 100 ms, or as `Expect.withChecks` sets. That is also how often a getter of the page's on the path
+runs.
 
 Like CSS expectations, it requires exactly one match even with `not: true`, retries until the deadline, and reports
 the value read or the match count.
@@ -291,7 +291,7 @@ A locator's expectation returns its first observation without waiting for change
 browser measures the element at its next rendering update, so the first observation can be the match count alone;
 the ratio follows as soon as the browser reports it. Later rounds re-check in the
 page on DOM changes, animation frames, and `input`, `change`, or focus events, for up to a second at a time until
-the deadline; `toHaveJSProperty`, which reads at `Expect.CheckInterval` instead, is the exception. A failure keeps the observations received before the deadline; a browser stall before the first
+the deadline; `toHaveJSProperty`, which reads as `Expect.withChecks` sets instead, is the exception. A failure keeps the observations received before the deadline; a browser stall before the first
 reply can leave its history empty. Replies received after the deadline cannot change the returned failure.
 
 The first failed expectation stops the rest. To see every failure, collect them with Effect:
@@ -359,12 +359,34 @@ const onePage = Condition.and(atLeast(10), Condition.not(atLeast(21))).pipe(
 
 const resultsLoaded = Effect.fn("resultsLoaded")(function*(page: Page.Page) {
   const results = page.getByRole("listitem").count
-  yield* Expect.that(results, onePage).pipe(Expect.withCheckInterval("250 millis"))
+  yield* Expect.that(results, onePage).pipe(
+    Expect.withChecks(Expect.Checks.interval("250 millis"))
+  )
 })
 ```
 
 A [`Watchable`](#watchables) such as `page.url` re-checks on each change; any other effect re-runs every
-100 ms, or as `Expect.withCheckInterval` sets.
+100 ms, or as `Expect.withChecks` sets. `Expect.Checks.animationFrame(page)` re-runs it after each of the page's
+animation frames, and `Expect.Checks.mutation(page)` after each change to its DOM and only then, which suits a page
+function that reads state a script sets:
+
+```ts
+import { Condition, Expect, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const rendered = Effect.fn("rendered")(function*(page: Page.Page) {
+  const ready = page.evaluateInMainWorld(() =>
+    (window as { ready?: boolean }).ready === true
+  )
+  yield* Expect.that(ready, Condition.make("ready", (value: boolean) => value)).pipe(
+    Expect.withChecks(Expect.Checks.animationFrame(page))
+  )
+})
+```
+
+A page that stops rendering frames, such as a tab in the background, isn't checked again before the deadline. Each
+check is a round trip to the page, so a state that appears and disappears between two checks isn't seen. An interval
+that isn't positive and finite fails with `ExpectError` when the expectation runs.
 
 ## Accessibility trees
 

@@ -27,7 +27,7 @@ The principles (docs/design.md), as they apply to this layer, written the way Ef
   - Nothing to configure: a value. That is an `Effect` for operations (`page.title`, `locator.count`, `tab.inspect`, `context.newPage`) or a plain property for pure derivations (`locator.first`).
   - Settings: a trailing `options?: … | undefined`, as Effect's `handle.kill(options?)` and `client.get(url, options?)` take them. Every action has checks you can adjust, so actions are calls: `button.click()`, `button.click({ button: "right" })`, `page.goto(url, { waitUntil: "load" })`. Reads stay values.
 - **`With` means "with a function",** as in Effect's `zipWith(that, f)` and `scopedWith(f)`: `Route.continueWith(change)`. It never means "with options".
-- **Handles get members; cross-cutting settings are dual combinators** that work data-first and in `pipe`, each backed by a `Context.Reference`: `Deadline.within`, `Deadline.withDefaultBudget`, `Diagnostics.withPreset`, `Expect.withCheckInterval`, and `Page.withUserGesture`, as in `button.click().pipe(Deadline.within("5 seconds"))`. Option bags hold only what is specific to one operation.
+- **Handles get members; cross-cutting settings are dual combinators** that work data-first and in `pipe`, each backed by a `Context.Reference`: `Deadline.within`, `Deadline.withDefaultBudget`, `Diagnostics.withPreset`, `Expect.withChecks`, and `Page.withUserGesture`, as in `button.click().pipe(Deadline.within("5 seconds"))`. Option bags hold only what is specific to one operation.
 - **Services have module-level accessors,** as `HttpClient.get` uses the `HttpClient` in context: `Browser.newPage(options?)` and `Browser.newContext(options?)` use the `Browser` in context. Code that already holds a `Browser` uses its members, which do the same.
 - **Layers are named `layer…`:** `Chromium.layer(options)`, `Chromium.layerConfig(config)`, `Chromium.layerConnect(endpoint, options?)`, `WebKit.layerAttach(endpoint)`, `Bidi.layerConnect(endpoint)`, and `Browser.layerTest(timeline)`.
 - **Events are modules, not members.** `Download.next(page)` subscribes, and the action that causes the download comes on the next line (State and events).
@@ -857,8 +857,18 @@ declare const toSatisfy: {
 // the general form: a subject and a condition
 //   a Watchable is re-checked on each change; any other Effect is re-run at the interval
 declare const that: <A, E, R>(subject: Effect<A, E, R>, condition: Condition.Condition<A>) => Effect<void, E | ExpectationFailed | TargetGone | Timeout, R>
-declare const withCheckInterval: Dual<Duration.Input>   // re-check interval for subjects with no change signal; default 100 ms
-declare const CheckInterval: Context.Reference<Duration>
+// when a subject with no change signal is checked again: a page's frames, its DOM mutations, or an interval
+type Checks =
+  | { _tag: "AnimationFrame"; page: Page.ReadonlyPage }
+  | { _tag: "Mutation"; page: Page.ReadonlyPage }
+  | { _tag: "Interval"; interval: Duration.Input }
+declare const Checks: {
+  animationFrame: (page: Page.ReadonlyPage) => Checks
+  mutation: (page: Page.ReadonlyPage) => Checks
+  interval: (interval: Duration.Input) => Checks   // positive and finite, or ExpectError{InvalidInput} when run
+}
+declare const withChecks: Dual<Checks>   // default Checks.interval("100 millis"); adds ExpectError to the error channel
+declare const CheckCadence: Context.Reference<Checks>
 
 // Condition
 declare const make: <A>(description: string, predicate: Predicate<A>) => Condition<A>   // the description appears in ExpectationFailed
@@ -882,9 +892,9 @@ declare const unchecked: Children                                               
 
 - **How expectations evaluate.** An expectation checks once immediately, then again each time something its subject depends on changes. There is no backoff, because backoff adds more lag the longer a test waits (rule 23). Everything runs on the browser's clock, within the deadline (`Deadline.within` adjusts it). Where the change signal comes from depends on the subject:
   - **A locator's expectation waits in the page.** One round is one engine request: it checks, and if the condition doesn't hold, checks again on each mutation of the document (children, attributes, text), each `input`, `change`, `focusin`, and `focusout` event, and each animation frame, answering when the condition holds or after a second. L1 sends rounds until the deadline. No change is missed between checks, and there is no polling cadence; a page that renders no frames and changes nothing is checked again at the next round.
-  - **`toHaveJSProperty`** is the one locator expectation that doesn't: assigning a property is no change the page reports, so it reads the property in the page's main world again at `Expect.CheckInterval` (100 ms unless set), and the interval sets how often a getter of the page's on the path runs.
+  - **`toHaveJSProperty`** is the one locator expectation that doesn't: assigning a property is no change the page reports, so it reads the property in the page's main world again as `Expect.withChecks` sets (every 100 ms unless set), which sets how often a getter of the page's on the path runs.
   - **A `Watchable`** (`toHaveURL` on `page.url`, `Expect.that` on any `Watchable`) is checked again on each change.
-  - **Any other effect,** given to `Expect.that`, is run again at `Expect.CheckInterval` (100 ms unless set). It runs under the expectation's deadline, and a check still running at the deadline, or failing with it, is a check that didn't finish: the expectation fails with `ExpectationFailed`, not the subject's `Timeout`.
+  - **Any other effect,** given to `Expect.that`, is run again as `Expect.withChecks` sets: after the page's next animation frame (`Checks.animationFrame(page)`), after its next DOM mutation and only then (`Checks.mutation(page)`), or once an interval has passed (`Checks.interval`, 100 ms unless set). A wait on a page's frames or mutations is armed before each check, so a change during one wakes the next at once; each wait is capped by the time left, so a page that renders no frames fails at the deadline. Each check is a round trip, so a state that appears and disappears between two checks isn't seen. It runs under the expectation's deadline, and a check still running at the deadline, or failing with it, is a check that didn't finish: the expectation fails with `ExpectationFailed`, not the subject's `Timeout`.
 
   `toHaveAccessibleName` retries the one match's computed accessible name (excluding hidden elements, including hidden referenced labels). Strings match the whole name with whitespace normalized; regular expressions test the computed name. Its optional `ignoreCase` overrides the regular expression flag, while omission preserves it; a string's case is folded with `toLowerCase`, regardless of the browser's locale. Roles that prohibit naming have empty names in both this matcher and role-locator filtering; their label/content contributions to other elements are preserved, and explicit nameable roles override implicit roles. Missing or multiple matches retry with match-count evidence; name mismatches report the observed name.
   `toHaveAccessibleDescription` and `toHaveAccessibleErrorMessage` compare the same way, with the same `ignoreCase`. The description is the first source that applies, even when its text is empty: the elements `aria-describedby` references, when at least one of its IDs resolves; `aria-description`, when present; a table's caption or a button, submit, or reset input's `value`, when that isn't the element's name; a `summary` element's content, when `aria-label` or `aria-labelledby` gave the name; and a `title` that isn't the element's name. A hidden element's is empty. The error message is the text of the elements `aria-errormessage` references while the element is invalid, by an `aria-invalid` other than blank or exactly `false` in any ASCII case, or by failed native constraint validation; otherwise it's empty. Hidden referenced elements contribute to both. Their `not` negates only the comparison, as `toHaveCSS`'s does, so exactly one match is still required. Neither is computed unless the matcher runs.
