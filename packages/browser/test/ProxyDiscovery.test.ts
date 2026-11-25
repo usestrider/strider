@@ -241,3 +241,43 @@ describe("NO_PROXY compatibility", () => {
     assert.isTrue(ProxyHttpClient.bypasses("*browser.test", new URL("http://mybrowser.test")))
   })
 })
+
+describe("HTTPS proxy tunnels, untrusted", () => {
+  it("refuses an endpoint whose certificate isn't trusted, inside a tunnel", async () => {
+    const fixture = (name: string) =>
+      fs.readFileSync(new URL(`./fixtures/client-certificates/${name}`, import.meta.url))
+    const sockets = new Set<net.Socket>()
+    const target = https.createServer(
+      { key: fixture("server-key.pem"), cert: fixture("server.pem") },
+      version("ws://localhost/devtools/browser/untrusted")
+    )
+    const proxy = http.createServer()
+    target.on("connection", (socket) => sockets.add(socket))
+    const listen = (server: http.Server | https.Server) =>
+      new Promise<number>((done) =>
+        server.listen(0, "127.0.0.1", () => done((server.address() as net.AddressInfo).port))
+      )
+    try {
+      const targetPort = await listen(target)
+      const proxyPort = await listen(proxy)
+      proxy.on("connect", (_request, socket: net.Socket, head) => {
+        sockets.add(socket)
+        const upstream = net.connect(targetPort, "127.0.0.1", () => {
+          socket.write("HTTP/1.1 200 Connection Established\r\n\r\n")
+          upstream.write(head)
+          socket.pipe(upstream).pipe(socket)
+        })
+        sockets.add(upstream)
+      })
+      const exit = await Effect.runPromise(Effect.exit(resolve(`https://localhost:${targetPort}`, {
+        HTTPS_PROXY: `http://127.0.0.1:${proxyPort}`
+      })))
+      const reason = reasonOf(exit)
+      assert.strictEqual(reason?._tag, "ConnectionFailed")
+      assert.match(reason?.message ?? "", /certificate/i)
+    } finally {
+      for (const socket of sockets) socket.destroy()
+      await Promise.all([target, proxy].map((server) => new Promise<void>((done) => server.close(() => done()))))
+    }
+  })
+})

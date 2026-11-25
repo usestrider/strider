@@ -80,6 +80,10 @@ export const unsupported = (capability: string, hint: string): Adapter.AdapterEr
 /** What a connection's state knows of its browser's end: the reason, once the browser is closing. */
 export interface Ending {
   browserEnd?: Target.CloseReason | undefined
+  /** Whether `closing` has marked it: the browser's layer is closing it, which nothing takes back. */
+  released?: boolean | undefined
+  /** The explicit closes sent and not refused. */
+  closes?: number | undefined
 }
 
 /** Why targets end when the connection does: the browser's reason once it is closing, else `ConnectionLost`. */
@@ -88,8 +92,25 @@ export const closed = (ending: Ending): Target.CloseReason => ending.browserEnd 
 /** Marks the browser closing, for `reason`: what ends from then on, as it shuts down, ends with it. */
 export const closing = (ending: Ending) => (reason: Target.CloseReason): Effect.Effect<void> =>
   Effect.sync(() => {
+    ending.released = true
     ending.browserEnd ??= reason
   })
+
+/** Records an explicit close on its way: what ends from then on ends with `BrowserClosed`. */
+export const requestClose = (ending: Ending): void => {
+  ending.closes = (ending.closes ?? 0) + 1
+  ending.browserEnd ??= new Target.BrowserClosed({})
+}
+
+/**
+ * Records that the browser refused an explicit close, so it keeps running: once no other close is on its way and the
+ * layer isn't closing it, a later end of the connection is a loss again. A close the caller stopped waiting for, by
+ * its deadline or interruption, isn't a refusal: the browser may have accepted it.
+ */
+export const refuseClose = (ending: Ending): void => {
+  ending.closes = Math.max(0, (ending.closes ?? 0) - 1)
+  if (ending.closes === 0 && ending.released !== true) ending.browserEnd = undefined
+}
 
 /**
  * Ends the browser for every client: marks it closing, for `BrowserClosed`, until the browser refuses, sends
@@ -104,21 +125,18 @@ export const closeBrowser = (
   ended: Effect.Effect<unknown, unknown>
 ): Effect.Effect<void, Adapter.AdapterError> =>
   Effect.suspend(() => {
-    const before = ending.browserEnd
-    ending.browserEnd ??= new Target.BrowserClosed({})
+    requestClose(ending)
     return Effect.all([
       close.pipe(
         Effect.catchIf(
           (error) => error.reason._tag === "SessionEnded" && error.reason.why === "connectionLost",
           () => Effect.void
         ),
+        Effect.tapError(() => Effect.sync(() => refuseClose(ending))),
         Effect.mapError(protocolError)
       ),
       Effect.ignore(ended)
-    ], { concurrency: "unbounded", discard: true }).pipe(
-      // A close the browser refuses leaves it running
-      Effect.tapError(() => Effect.sync(() => (ending.browserEnd = before)))
-    )
+    ], { concurrency: "unbounded", discard: true })
   })
 
 /** A protocol failure as an adapter error (`Adapter.protocolError`). */

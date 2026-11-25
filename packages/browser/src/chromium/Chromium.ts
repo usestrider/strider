@@ -154,8 +154,10 @@ export const layerConfig = (
  *
  * The `/json/version` lookup follows the environment's proxy, read through `Config`: `HTTP_PROXY` for an `http:`
  * endpoint, which the proxy is asked for in absolute form with the endpoint's `Host`, and `HTTPS_PROXY` for an
- * `https:` one, reached through a `CONNECT`. The lower-case names come first, and `NO_PROXY` lists the hosts asked
- * directly: `*` for all of them, `.example.com` for a domain and its subdomains, and `host:port` for one port.
+ * `https:` one, reached through a `CONNECT`, with TLS to the endpoint inside the tunnel. The lower-case names come
+ * first. Redirects are followed through the proxy, as a direct lookup follows them. `NO_PROXY` lists the hosts
+ * asked directly, as Playwright reads it: `*` for all of them, `.example.com` for the hosts ending with it but not
+ * `example.com` itself, `*example.com` for every host ending with `example.com`, and `host:port` for one port.
  * Credentials in a proxy's URL go as `Proxy-Authorization`.
  *
  * **Gotchas**

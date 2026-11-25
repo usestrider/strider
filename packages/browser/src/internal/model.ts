@@ -21,7 +21,7 @@ import * as Scope from "effect/Scope"
 import type * as Semaphore from "effect/Semaphore"
 import type * as BrowserWorker from "../BrowserWorker.ts"
 import type * as ConsoleMessage from "../ConsoleMessage.ts"
-import type * as Deadline from "../Deadline.ts"
+import * as Deadline from "../Deadline.ts"
 import type * as Declaration from "../Declaration.ts"
 import type * as Download from "../Download.ts"
 import type * as Keyboard from "../Keyboard.ts"
@@ -37,6 +37,7 @@ import type * as UncaughtException from "../UncaughtException.ts"
 import type * as Url from "../Url.ts"
 import type * as UserContext from "../UserContext.ts"
 import type * as Adapter from "./adapter.ts"
+import * as Kit from "./adapterKit.ts"
 import * as BoundedAdapter from "./boundedAdapter.ts"
 import * as ConsoleArguments from "./consoleArguments.ts"
 import type * as Events from "./events.ts"
@@ -556,8 +557,8 @@ export const make = Effect.fnUntraced(function*() {
   // Runs after the browser's own finalizers, which close it, and after the watcher of its connection is gone: what
   // is still open, such as a context or page held past the browser's scope, ends with the browser
   const ended = yield* Deferred.make<Target.CloseReason>()
-  /** Set once the browser is closing, so the connection's end says it was closed rather than lost. */
-  let closingReason: Target.CloseReason | undefined
+  /** Whether the browser is closing, so the connection's end says it was closed rather than lost. */
+  const ending: Kit.Ending = {}
   yield* Effect.addFinalizer(() =>
     Deferred.succeed(ended, new Target.BrowserClosed({})).pipe(
       Effect.andThen(fold.loseConnection(new Target.BrowserClosed({})))
@@ -583,7 +584,7 @@ export const make = Effect.fnUntraced(function*() {
       yield* connected.closed.pipe(
         // A browser closing ends what is still open with it, as `BrowserClosed`; otherwise the connection was lost
         Effect.andThen(Effect.suspend(() => {
-          const reason = closingReason ?? new Target.ConnectionLost({})
+          const reason = Kit.closed(ending)
           return Deferred.succeed(ended, reason).pipe(Effect.andThen(fold.loseConnection(reason)))
         })),
         Effect.forkScoped
@@ -599,11 +600,16 @@ export const make = Effect.fnUntraced(function*() {
         ended: Deferred.await(ended),
         isConnected: Effect.map(Deferred.isDone(ended), (done) => !done),
         closeBrowser: Effect.suspend(() => {
-          const before = closingReason
-          closingReason ??= new Target.BrowserClosed({})
-          // A close the browser refuses leaves it running, so a later end of the connection is a loss again
-          return bounded.closeBrowser().pipe(Effect.tapError(() => Effect.sync(() => (closingReason = before))))
-        }).pipe(Effect.andThen(Deferred.await(ended))),
+          // A connection that has ended has no browser left to close, whatever the backend can do
+          if (Deferred.isDoneUnsafe(ended)) return Effect.void
+          Kit.requestClose(ending)
+          return bounded.closeBrowser().pipe(
+            Effect.tapError((error) =>
+              Deadline.isTimeout(error) ? Effect.void : Effect.sync(() => Kit.refuseClose(ending))
+            ),
+            Effect.andThen(Deferred.await(ended))
+          )
+        }),
         consoleArguments,
         pages: fold.pages,
         contexts: fold.contexts,
@@ -642,9 +648,10 @@ export const make = Effect.fnUntraced(function*() {
     })
 
   /** Marks the browser closing, for `BrowserClosed`: what ends from then on, as it shuts down, ends with it. */
-  const closing = Effect.suspend(() => {
-    closingReason ??= new Target.BrowserClosed({})
-    return attached === undefined ? Effect.void : attached.closing(new Target.BrowserClosed({}))
-  })
+  const closing = Kit.closing(ending)(new Target.BrowserClosed({})).pipe(
+    Effect.andThen(
+      Effect.suspend(() => attached === undefined ? Effect.void : attached.closing(new Target.BrowserClosed({})))
+    )
+  )
   return { sink: fold.sink, attach, closing }
 })
