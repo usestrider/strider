@@ -1,6 +1,11 @@
 /** A context's `baseURL`: how relative URLs and URL patterns resolve against it. */
 import { assert, describe, it } from "@effect/vitest"
+import { Browser } from "@usestrider/browser"
+import * as Effect from "effect/Effect"
 import * as BaseUrl from "../src/internal/baseUrl.ts"
+import * as BrowserImpl from "../src/internal/browser.ts"
+import * as Fake from "../src/internal/fake.ts"
+import * as Handles from "../src/internal/handles.ts"
 import * as UrlPattern from "../src/internal/urlPattern.ts"
 
 const base = "http://127.0.0.1:8080/app/index.html"
@@ -48,6 +53,30 @@ describe("A relative URL pattern", () => {
     }
   })
 
+  it("keeps literal marker text inherited from the base", () => {
+    assert.strictEqual(
+      BaseUrl.pattern("/api/**", "http://zq0zq.example/"),
+      "http://zq0zq.example/api/**"
+    )
+  })
+
+  it("keeps literal marker text after a hostname is lowercased", () => {
+    assert.strictEqual(
+      BaseUrl.pattern("//ZQ0ZQ.example/**", base),
+      "http://zq0zq.example/**"
+    )
+  })
+
+  it("preserves marker text in the input and query and fragment delimiters in globs", () => {
+    assert.strictEqual(BaseUrl.pattern("/zq0zq/**", base), "http://127.0.0.1:8080/zq0zq/**")
+    const pattern = BaseUrl.pattern("/a*?q=*#x*", base)
+    assert.strictEqual(pattern, "http://127.0.0.1:8080/a*?q=*#x*")
+    assert.isTrue(UrlPattern.compile(pattern)("http://127.0.0.1:8080/abc?q=one#xyz"))
+    assert.strictEqual(BaseUrl.pattern("//HOST/**", base), "http://host/**")
+    // A colon after a scheme-shaped name is a scheme under the stated resolution rule.
+    assert.strictEqual(BaseUrl.pattern("host:8080/path", base), "host:8080/path")
+  })
+
   it("is unchanged without a base", () => {
     for (const pattern of ["/api/**", "/products/:id", "a"]) {
       assert.strictEqual(BaseUrl.pattern(pattern, undefined), pattern)
@@ -59,4 +88,29 @@ describe("A relative URL pattern", () => {
     assert.strictEqual(BaseUrl.webSocketPattern("/ws/**", "https://example.com/"), "wss://example.com/ws/**")
     assert.strictEqual(BaseUrl.webSocketPattern("wss://other/ws", base), "wss://other/ws")
   })
+})
+
+describe("A launched default context's base URL", () => {
+  it.effect("outlives a control scope and is restored when the launch scope closes", () =>
+    Effect.gen(function*() {
+      const entry = yield* Effect.gen(function*() {
+        const browser = yield* Browser.Browser
+        const entry = Handles.target(browser.defaultContext).behind.entry
+        assert.strictEqual(BaseUrl.of(entry), base)
+        yield* Effect.scoped(Effect.gen(function*() {
+          const controlled = yield* browser.defaultContext.control
+          assert.strictEqual(BaseUrl.of(Handles.target(controlled).behind.entry), base)
+        }))
+        assert.strictEqual(BaseUrl.of(entry), base)
+        return entry
+      }).pipe(Effect.provide(BrowserImpl.layerLaunched(
+        "fake",
+        { baseURL: base },
+        Fake.connect([], {
+          info: new Browser.Info(Fake.info),
+          capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+        })
+      )))
+      assert.isUndefined(BaseUrl.of(entry))
+    }))
 })
