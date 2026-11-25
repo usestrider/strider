@@ -6041,6 +6041,86 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
         timeout
       )
 
+      it.effect("keeps a shifted physical code at its place or refuses it before input", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="i"><p id="log"></p><script>addEventListener('keydown', e => document.getElementById('log').textContent += e.key + ':' + e.code + ' ')</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const context = yield* Browser.newContext({ keyboardLayout: "de" })
+            const page = yield* context.newPage
+            yield* page.goto(url, { waitUntil: "load" })
+            const field = page.locator("#i")
+            yield* field.focus()
+            const press = page.keyboard.press("Digit2", { modifiers: ["Shift"] })
+            const located = field.press("Digit2", { modifiers: ["Shift"] })
+            if (yield* fullySupports("input.keyboardLayout")) {
+              yield* press
+              yield* located
+              assert.strictEqual(
+                (yield* page.locator("#log").readText).trim(),
+                "Shift:ShiftLeft \":Digit2 Shift:ShiftLeft \":Digit2"
+              )
+            } else {
+              const results = [yield* Effect.result(press), yield* Effect.result(located)]
+              const held = yield* Effect.scoped(Effect.gen(function*() {
+                yield* page.keyboard.hold("ShiftRight")
+                return yield* Effect.result(page.keyboard.hold("Digit2"))
+              }))
+              assert.deepStrictEqual(
+                [...results, held].map((result) =>
+                  result._tag === "Failure" &&
+                  (Keyboard.isKeyboardError(result.failure) || Locator.isLocatorError(result.failure)) &&
+                  result.failure.reason._tag === "Unsupported"
+                ),
+                [true, true, true],
+                "press, Locator.press, and hold must refuse the shifted code"
+              )
+            }
+          }))
+        }), timeout)
+
+      it.effect("holds a physical code with the same shifted key as press", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="i"><p id="log"></p><script>for (const type of ['keydown', 'keyup']) addEventListener(type, e => { if(e.code === 'KeyA') document.getElementById('log').textContent += type + ':' + e.key + ':' + e.code + ' ' })</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url, { waitUntil: "load" })
+            yield* page.locator("#i").focus()
+            yield* page.keyboard.hold("ShiftRight")
+            yield* page.keyboard.press("KeyA")
+            const held = yield* page.keyboard.hold("KeyA")
+            yield* held.release
+            assert.strictEqual(
+              (yield* page.locator("#log").readText).trim(),
+              "keydown:A:KeyA keyup:A:KeyA keydown:A:KeyA keyup:A:KeyA"
+            )
+          }))
+        }), timeout)
+
+      it.effect("keeps both modifier sides held until each side releases", () =>
+        Effect.gen(function*() {
+          const { url } = yield* fixture(() =>
+            `<input id="i"><p id="log"></p><script>for (const type of ['keydown', 'keyup']) addEventListener(type, e => { if(e.key === 'Shift') document.getElementById('log').textContent += type + ':' + e.code + ' ' })</script>`
+          )
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* newPage
+            yield* page.goto(url, { waitUntil: "load" })
+            yield* page.locator("#i").focus()
+            const left = yield* page.keyboard.hold("ShiftLeft")
+            const right = yield* page.keyboard.hold("ShiftRight")
+            yield* page.keyboard.press("KeyA")
+            yield* right.release
+            yield* left.release
+            assert.strictEqual(
+              (yield* page.locator("#log").readText).trim(),
+              "keydown:ShiftLeft keydown:ShiftRight keyup:ShiftRight keyup:ShiftLeft"
+            )
+          }))
+        }), timeout)
+
       it.effect("marks a keydown for a key already held as a repeat", () =>
         Effect.gen(function*() {
           const { url } = yield* fixture(() =>
