@@ -1933,3 +1933,14 @@ commits. One mechanism then serves all three browsers, and screenshots show the 
 only a page showing its actions waits before input. Compositing overlays into video frames in `VideoWriter` was
 rejected: Firefox writes its own video file, which no frame passes through, and screenshots would lack them.
 Playwright's deprecated `fontSize` option is not built; `style.title` sets the title's font like any other CSS.
+
+## Codes name places, characters name what's typed
+
+A key name passed to `press` or `hold` may be a key value or character, which names what is typed wherever the
+layout has it, or a UI Events `code`, which names a place on the keyboard (`ControlRight`, `Numpad1`, `KeyW`), and the
+page gets what the context's layout types there. They answer different questions, as the DOM's own `key` and `code`
+do, so they aren't two spellings of one thing; where both name the same key, bare `Shift`, `Control`, `Alt`, and
+`Meta` are the left-hand keys, the same press as `ShiftLeft` and the rest. The numeric keypad types with Num Lock on,
+the usual default, so `Numpad1` types `1`. A backend that can't send a key refuses it as `Unsupported` through its
+capability table. A `{ location }` option on a key value (`press("Control", { location: "right" })`) was rejected:
+it can't name a letter key by place regardless of layout, and code that drives keys by `code` would need translating.

@@ -273,6 +273,24 @@ const copyAll = Effect.fn("copyAll")(function*(page: Page.Page) {
 })
 ```
 
+A key's `code`, as in `event.code`, names its place on the keyboard instead: `"ControlRight"`, `"Numpad1"`,
+`"KeyW"`. The page gets what the layout types there, so `"KeyW"` is `z` on a French layout. `"Shift"`, `"Control"`,
+`"Alt"`, and `"Meta"` are the left-hand keys, and the keypad types with Num Lock on:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const moveForward = Effect.fn("moveForward")(function*(page: Page.Page) {
+  const game = page.getByRole("application", { name: "Game" })
+  yield* game.press("KeyW")
+  yield* game.press("ShiftRight")
+  yield* game.press("Numpad8")
+})
+```
+
+Only Chromium sends the media keys, such as `"MediaPlayPause"`; Firefox and WebKit fail with `Unsupported`.
+
 Typing uses a US layout unless the context sets another. A character the layout has no key for, such as `ß`, is
 typed as a key of its own with an empty `code`, which a page that reads `code` won't expect. Set the layout the
 page's users have, and Shift, AltGr, and dead keys type as they would:

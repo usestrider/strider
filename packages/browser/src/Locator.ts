@@ -1676,8 +1676,8 @@ export interface Locator extends ReadonlyLocator {
    *
    * **Details**
    *
-   * A key is a UI Events `key` value (`"Enter"`, `"a"`, `"ArrowDown"`) or one character; anything else fails with
-   * `InvalidInput`. `modifiers` are pressed before it and released after, and Shift turns `"a"` into `"A"`.
+   * A key is a UI Events `key` value (`"Enter"`, `"a"`, `"ArrowDown"`), one character, or a key's UI Events `code`
+   * (`"ControlRight"`, `"Numpad1"`, `"KeyW"`), as `Keyboard.Key` describes; anything else fails with `InvalidInput`. `modifiers` are pressed before it and released after, and Shift turns `"a"` into `"A"`.
    *
    * **Example** (Submitting a search with Enter)
    *

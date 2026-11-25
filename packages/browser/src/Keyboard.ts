@@ -21,7 +21,8 @@ import * as Reason from "./Reason.ts"
 import type * as Target from "./Target.ts"
 
 /**
- * Schema for a key value, such as `"Enter"`, `"a"`, or `"ArrowDown"`.
+ * Schema for a key name: a key value, such as `"Enter"`, `"a"`, or `"ArrowDown"`, or a key's code, such as
+ * `"ControlRight"`, `"Numpad1"`, or `"KeyW"`.
  *
  * @stability unstable
  * @category schemas
@@ -30,7 +31,26 @@ import type * as Target from "./Target.ts"
 export const Key = Schema.String.pipe(Schema.brand("~@usestrider/browser/Keyboard/Key"))
 
 /**
- * A key value from the UI Events `key` list, such as `"Enter"`, `"a"`, or `"ArrowDown"`.
+ * A key name: a key value from the UI Events `key` list, such as `"Enter"`, `"a"`, or `"ArrowDown"`, or a key's
+ * place on the keyboard, as its UI Events `code`, such as `"ControlRight"`, `"Numpad1"`, or `"KeyW"`.
+ *
+ * **Details**
+ *
+ * A key value or a character names what is typed, wherever the layout has it. A code names a place: the key the
+ * page gets is what the context's layout types there, so `"KeyW"` types `w` on `us` and `z` on `fr`, and its
+ * Shift character when Shift is held. `"Shift"`, `"Control"`, `"Alt"`, and `"Meta"` are the left-hand keys, the
+ * same as `"ShiftLeft"` and the rest; `"ShiftRight"` and the others name the right-hand ones. The numeric keypad
+ * types with Num Lock on: `"Numpad1"` types `1`, and `"NumpadEnter"` is an Enter. The audio and media keys
+ * (`"AudioVolumeMute"`, `"AudioVolumeDown"`, `"AudioVolumeUp"`, `"MediaTrackNext"`, `"MediaTrackPrevious"`,
+ * `"MediaPlayPause"`) are their own key values. Each key event's `location` says where its key is: left, right,
+ * numpad, or standard.
+ *
+ * **Gotchas**
+ *
+ * - Only Chromium sends the media keys; Firefox and WebKit refuse them with `Unsupported` (`input.mediaKeys`).
+ * - Firefox and WebKit send a character rather than a place, so a code whose layout's character a US keyboard has
+ *   elsewhere, such as `"KeyQ"` on `fr`, fails there with `Unsupported` (`input.keyboardLayout`). WebKit has no
+ *   keypad Enter, and refuses `"NumpadEnter"` the same way. Firefox reports the keypad's Enter at the left.
  *
  * @stability unstable
  * @category models
@@ -140,8 +160,13 @@ export interface HeldKey {
  */
 export interface Keyboard {
   /**
-   * Presses and releases one key: a key value such as `"Enter"`, or one character. Anything else fails with
-   * `InvalidInput`.
+   * Presses and releases one key: a key value such as `"Enter"`, one character, or a key's code such as
+   * `"ControlRight"` or `"Numpad1"` (`Keyboard.Key`). Anything else fails with `InvalidInput`.
+   *
+   * **Details**
+   *
+   * `"Shift"`, `"Control"`, `"Alt"`, and `"Meta"` press the left-hand keys. The numeric keypad types with Num Lock
+   * on, so `"Numpad1"` types `1`. A letter's code types what the context's layout puts there.
    *
    * **Example** (Closing a menu with Escape)
    *
