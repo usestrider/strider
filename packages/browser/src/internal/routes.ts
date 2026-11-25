@@ -103,10 +103,21 @@ const sameHeaders = (a: Readonly<Record<string, unknown>>, b: Readonly<Record<st
 
 /**
  * The paused request as a change is given it. Its body is an empty one of its own, not `HttpBody.empty`, so a
- * change that clears the body with `HttpBody.empty` is told from one that leaves it alone.
+ * change that clears the body with `HttpBody.empty` is told from one that leaves it alone. It is set without
+ * `setBody`, which would drop the request's `Content-Type` and `Content-Length` for an empty body: the headers
+ * stay as the browser paused them.
  */
-const unchanged = (paused: Model.PausedRequestEvent): HttpClientRequest.HttpClientRequest =>
-  HttpClientRequest.setBody(NetworkRequest.toHttpClientRequest(paused.request), new HttpBody.Empty())
+const unchanged = (paused: Model.PausedRequestEvent): HttpClientRequest.HttpClientRequest => {
+  const request = NetworkRequest.toHttpClientRequest(paused.request)
+  return HttpClientRequest.makeWith(
+    request.method,
+    request.url,
+    request.urlParams,
+    request.hash,
+    request.headers,
+    new HttpBody.Empty()
+  )
+}
 
 /**
  * A paused request, changed by `change` on top of the changes before it: what the routes below see, and what
