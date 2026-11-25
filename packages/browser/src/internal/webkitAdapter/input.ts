@@ -52,24 +52,33 @@ const virtualCodes = {
   NumpadDecimal: "NumberPadDecimal",
   NumpadDivide: "NumberPadDivide"
 } as Readonly<Record<string, Automation.VirtualKey>>
-const rightHand: Readonly<Record<string, Automation.VirtualKey>> = {
-  ShiftRight: "ShiftRight",
-  ControlRight: "ControlRight",
-  AltRight: "AlternateRight",
-  MetaRight: "MetaRight"
-}
-/**
- * The modifiers held, as Automation's keys: a modifier's right-hand key where that is the one held, since a state
- * naming the left one would release the right and press the left.
- */
-const heldKeys = (modifiers: Adapter.Modifiers, right: ReadonlySet<string>): Array<Automation.VirtualKey> => [
-  ...(modifiers.shift ? [right.has("ShiftRight") ? "ShiftRight" as const : "Shift" as const] : []),
-  ...(modifiers.control ? [right.has("ControlRight") ? "ControlRight" as const : "Control" as const] : []),
-  ...(modifiers.alt ? [right.has("AltRight") ? "AlternateRight" as const : "Alternate" as const] : []),
-  ...(modifiers.meta ? [right.has("MetaRight") ? "MetaRight" as const : "Meta" as const] : [])
+// Each modifier's two keys, by code, as Automation names them
+const sides: ReadonlyArray<
+  readonly [
+    flag: keyof Adapter.Modifiers,
+    left: string,
+    right: string,
+    keys: readonly [Automation.VirtualKey, Automation.VirtualKey]
+  ]
+> = [
+  ["shift", "ShiftLeft", "ShiftRight", ["Shift", "ShiftRight"]],
+  ["control", "ControlLeft", "ControlRight", ["Control", "ControlRight"]],
+  ["alt", "AltLeft", "AltRight", ["Alternate", "AlternateRight"]],
+  ["meta", "MetaLeft", "MetaRight", ["Meta", "MetaRight"]]
 ]
-/** The right-hand modifiers each page holds, across sequences, as `keyboard.hold` leaves them. */
-const rightHeld = new WeakMap<object, Set<string>>()
+/**
+ * The modifiers held, as Automation's keys: each side of a modifier that is held, so a state names both while both
+ * are, and the left where a flag is set with neither key held. A state naming one side only would release the other.
+ */
+const heldKeys = (modifiers: Adapter.Modifiers, held: ReadonlySet<string>): Array<Automation.VirtualKey> =>
+  sides.flatMap(([flag, left, right, [leftKey, rightKey]]) => {
+    if (!modifiers[flag]) return []
+    const both = [...(held.has(left) ? [leftKey] : []), ...(held.has(right) ? [rightKey] : [])]
+    return both.length === 0 ? [leftKey] : both
+  })
+const modifierCodes = new Set(sides.flatMap(([, left, right]) => [left, right]))
+/** The modifier keys each page holds, by code, across sequences, as `keyboard.hold` leaves them. */
+const modifiersHeld = new WeakMap<object, Set<string>>()
 const capitalized = (button: string) => (button.charAt(0).toUpperCase() + button.slice(1)) as Automation.MouseButton
 const heldButton = (buttons: number): Automation.MouseButton | undefined =>
   buttons & 1
@@ -122,8 +131,8 @@ export const dispatchInputLaunched = Effect.fnUntraced(
       }
     }
     const handle = yield* pageHandleOf(state, page).pipe(Effect.mapError(Adapter.unsent))
-    let right = rightHeld.get(page)
-    if (right === undefined) rightHeld.set(page, right = new Set())
+    let down = modifiersHeld.get(page)
+    if (down === undefined) modifiersHeld.set(page, down = new Set())
     const process = yield* processOfContext(state, page.context).pipe(Effect.mapError(Adapter.unsent))
     let wheel = state.wheelStates.get(process.key)
     if (wheel === undefined) state.wheelStates.set(process.key, wheel = { width: 0, height: 0 })
@@ -149,7 +158,7 @@ export const dispatchInputLaunched = Effect.fnUntraced(
           // A state makes an event only when it names its interaction; the button is the one it moves
           const button = event.button === "none" ? heldButton(event.buttons) : capitalized(event.button)
           steps.push([
-            { sourceId: "keyboard", pressedVirtualKeys: heldKeys(event.modifiers, right) },
+            { sourceId: "keyboard", pressedVirtualKeys: heldKeys(event.modifiers, down) },
             {
               sourceId: "mouse",
               origin: "Viewport",
@@ -164,7 +173,7 @@ export const dispatchInputLaunched = Effect.fnUntraced(
           wheel.width += Math.round(event.deltaX)
           wheel.height += Math.round(event.deltaY)
           steps.push([
-            { sourceId: "keyboard", pressedVirtualKeys: heldKeys(event.modifiers, right) },
+            { sourceId: "keyboard", pressedVirtualKeys: heldKeys(event.modifiers, down) },
             {
               sourceId: "wheel",
               origin: "Viewport",
@@ -176,11 +185,11 @@ export const dispatchInputLaunched = Effect.fnUntraced(
         case "Key": {
           const named = virtualCodes[event.code] ?? virtualKeys[event.key]
           const pressed = event.type === "down"
-          if (rightHand[event.code] !== undefined) {
-            if (pressed) right.add(event.code)
-            else right.delete(event.code)
+          if (modifierCodes.has(event.code)) {
+            if (pressed) down.add(event.code)
+            else down.delete(event.code)
           }
-          const held = heldKeys(event.modifiers, right)
+          const held = heldKeys(event.modifiers, down)
           steps.push([{
             sourceId: "keyboard",
             pressedVirtualKeys: pressed && named !== undefined && !held.includes(named) ? [...held, named] : held,

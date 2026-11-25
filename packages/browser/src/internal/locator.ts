@@ -930,24 +930,21 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     return Effect.suspend(() => {
       const layout = Devices.layoutOf(this.owner.runtime, this.owner.page)
       if (Keys.strokes(key, layout) === undefined) return Effect.fail(this.unknownKey("Locator.press", key))
-      const placed = Effect.flatMap(
-        Devices.placedElsewhere(this.owner, key, layout),
-        (elsewhere) =>
-          Option.isSome(elsewhere)
-            ? Effect.fail(this.error("Locator.press", elsewhere.value, Operation.idNow()))
-            : Effect.void
-      )
-      return placed.pipe(Effect.andThen(this.act(
-        "Locator.press",
-        options,
-        focusChecks,
-        { _tag: "Focus" },
-        (_ready, io) =>
-          Effect.as(
-            io.send(Input.type(this.owner.page.inputState, key, layout, options?.modifiers ?? [])!),
-            "done" as const
-          )
-      )))
+      const wanted = options?.modifiers ?? []
+      return Effect.flatMap(Devices.keyRefusal(this.owner), (refused) =>
+        this.act(
+          "Locator.press",
+          options,
+          focusChecks,
+          { _tag: "Focus" },
+          (_ready, io, record) => {
+            const state = this.owner.page.inputState
+            const refusal = refused(state, key, layout, wanted)
+            return refusal !== undefined
+              ? Effect.fail(this.error("Locator.press", refusal, record.id))
+              : Effect.as(io.send(Input.type(state, key, layout, wanted)!), "done" as const)
+          }
+        ))
     })
   }
   pressSequentially(text: string | Redacted.Redacted<string>, options?: Locator.TypeOptions) {

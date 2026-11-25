@@ -6110,6 +6110,15 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
             yield* page.goto(url, { waitUntil: "load" })
             yield* page.locator("#i").focus()
             const left = yield* page.keyboard.hold("ShiftLeft")
+            if (!(yield* supports("input.modifierSides"))) {
+              // A backend that tracks a held key by its value refuses the other side before sending it
+              const error = yield* Effect.flip(page.keyboard.hold("ShiftRight"))
+              assert(Keyboard.isKeyboardError(error) && error.reason._tag === "Unsupported", String(error))
+              assert.strictEqual(error.reason.capability, "input.modifierSides")
+              yield* left.release
+              assert.strictEqual((yield* page.locator("#log").readText).trim(), "keydown:ShiftLeft keyup:ShiftLeft")
+              return
+            }
             const right = yield* page.keyboard.hold("ShiftRight")
             yield* page.keyboard.press("KeyA")
             yield* right.release

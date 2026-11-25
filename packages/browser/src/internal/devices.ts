@@ -128,22 +128,48 @@ const unsupported = (owner: Owner, capability: string) =>
   })
 
 /**
- * `Unsupported` for a code that names a layout's place where a US keyboard has another key, on a backend that sends
- * characters rather than places: it would type the character at its US place (`input.keyboardLayout`).
+ * What refuses a key the backend can't send as asked, read from its capability table before the input permit and
+ * applied to the input state under it, with the modifiers held and asked for:
+ *
+ * - a code naming a layout's place where a US keyboard types its character, with Shift or not, on another key, on
+ *   a backend that sends characters rather than places, which would type it at its US place (`input.keyboardLayout`);
+ * - a modifier's one side while its other side is held, on a backend that tracks a held key by its value, which
+ *   would release both at the first release (`input.modifierSides`).
  */
-export const placedElsewhere = (owner: Owner, key: string, layout: Keyboard.Layout) =>
+export const keyRefusal = (owner: Owner) =>
   Effect.map(SubscriptionRef.get(owner.runtime.model.adapter.capabilities), (capabilities) => {
-    if (!Keys.placedOffUs(key, layout)) return Option.none<Reason.Unsupported>()
-    const entry = capabilities.entries.find((each) => each.name === "input.keyboardLayout")
-    return entry === undefined || entry.status === "supported"
-      ? Option.none<Reason.Unsupported>()
-      : Option.some(
-        new Reason.Unsupported({
-          capability: "input.keyboardLayout",
-          backend: owner.runtime.backend,
-          hint: `${key} on the ${layout} layout: ${entry.limitations.join("; ")}`
-        })
-      )
+    const entryOf = (name: string) => capabilities.entries.find((each) => each.name === name)
+    const layoutEntry = entryOf("input.keyboardLayout")
+    const sidesEntry = entryOf("input.modifierSides")
+    const refusal = (capability: string, hint: string) =>
+      new Reason.Unsupported({ capability, backend: owner.runtime.backend, hint })
+    return (
+      state: Input.State,
+      key: string,
+      layout: Keyboard.Layout,
+      wanted: ReadonlyArray<Keyboard.Modifier> = []
+    ): Reason.Unsupported | undefined => {
+      const shift = Input.modifiers(state, wanted).shift
+      if (
+        layoutEntry !== undefined && layoutEntry.status !== "supported" && Keys.placedOffUs(key, layout, shift)
+      ) {
+        return refusal(
+          "input.keyboardLayout",
+          `${key}${shift ? " with Shift" : ""} on the ${layout} layout: ${layoutEntry.limitations.join("; ")}`
+        )
+      }
+      const definition = Keys.definition(key, layout)
+      if (
+        sidesEntry !== undefined && sidesEntry.status === "unsupported" && definition !== undefined &&
+        Keys.otherSideHeld(state.keys, definition)
+      ) {
+        return refusal(
+          "input.modifierSides",
+          `${key} while its other side is held: ${sidesEntry.limitations.join("; ")}`
+        )
+      }
+      return undefined
+    }
   })
 
 /** Releases a held input in its scope's finalizer; a release that fails on a live page breaks its input state. */
@@ -207,15 +233,13 @@ export const layoutOf = (_runtime: Runtime.Runtime, page: Model.PageEntry): Keyb
 export const keyboard = (owner: Owner): Keyboard.Keyboard => ({
   press: Effect.fnUntraced(function*(key: Keyboard.Key | string, options?: Keyboard.PressOptions) {
     const layout = layoutOf(owner.runtime, owner.page)
-    const elsewhere = yield* placedElsewhere(owner, key, layout)
-    if (Option.isSome(elsewhere)) {
-      return yield* Effect.fail(keyboardError("Keyboard.press")(elsewhere.value, Operation.idNow()))
-    }
+    const refused = yield* keyRefusal(owner)
+    const wanted = options?.modifiers ?? []
     yield* sending(
       owner,
       "Keyboard.press",
       keyboardError("Keyboard.press"),
-      (state) => Input.type(state, key, layout, options?.modifiers ?? []) ?? unknownKey(key)
+      (state) => refused(state, key, layout, wanted) ?? Input.type(state, key, layout, wanted) ?? unknownKey(key)
     )
   }),
   pressSequentially: (text, options) => {
@@ -245,19 +269,24 @@ export const keyboard = (owner: Owner): Keyboard.Keyboard => ({
       text: Redacted.isRedacted(text) ? Redacted.value(text) : text
     }]),
   hold: Effect.fnUntraced(function*(key: Keyboard.Key | string) {
-    const definition = Keys.definition(key, layoutOf(owner.runtime, owner.page))
-    if (definition === undefined) {
+    const layout = layoutOf(owner.runtime, owner.page)
+    const unshifted = Keys.definition(key, layout)
+    if (unshifted === undefined) {
       return yield* Effect.fail(keyboardError("Keyboard.hold")(unknownKey(key), Operation.idNow()))
     }
-    const elsewhere = yield* placedElsewhere(owner, key, layoutOf(owner.runtime, owner.page))
-    if (Option.isSome(elsewhere)) {
-      return yield* Effect.fail(keyboardError("Keyboard.hold")(elsewhere.value, Operation.idNow()))
-    }
+    const refused = yield* keyRefusal(owner)
+    // The key Shift held makes of it, as a press would: the one held, and the one its release sends
+    let definition = unshifted
     yield* sending(
       owner,
       "Keyboard.hold",
       keyboardError("Keyboard.hold"),
-      (state) => [Input.keyDown(state, definition)],
+      (state) => {
+        const refusal = refused(state, key, layout)
+        if (refusal !== undefined) return refusal
+        definition = Input.modifiers(state).shift ? Keys.withShift(unshifted, layout) : unshifted
+        return [Input.keyDown(state, definition)]
+      },
       (state) => state.keys.push(definition)
     )
     const release = releasing(owner, `the ${key} key`, (state) => [Input.keyUp(state, definition)], (state) => {

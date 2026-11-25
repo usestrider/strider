@@ -141,14 +141,21 @@ const atCode = (code: string, layout: Keyboard.Layout): Definition | undefined =
 const coded = (code: string, layout: Keyboard.Layout): Definition | undefined => codes.get(code) ?? atCode(code, layout)
 
 /**
- * Whether a key names a layout's place whose character a backend that sends characters, not places, would type
- * elsewhere: a code such as `KeyQ` on `fr`, which types `a`, where a US keyboard has `a` on `KeyA`.
+ * Whether a key names a layout's place whose character, with Shift held or not, a backend that sends characters,
+ * not places, would type elsewhere: a code such as `KeyQ` on `fr`, which types `a`, where a US keyboard has `a` on
+ * `KeyA`, or `Digit2` with Shift on `de`, which types `"`, on a US keyboard's `Quote`.
  */
-export const placedOffUs = (key: string, layout: Keyboard.Layout): boolean => {
+export const placedOffUs = (key: string, layout: Keyboard.Layout, shift = false): boolean => {
   if (named.has(key) || codes.has(key)) return false
-  const here = atCode(key, layout)
-  return here !== undefined && here.code !== definition(here.key, "us")?.code
+  const unshifted = atCode(key, layout)
+  if (unshifted === undefined) return false
+  const here = shift ? withShift(unshifted, layout) : unshifted
+  return here.code !== definition(here.key, "us")?.code
 }
+
+/** Whether a modifier's other side is held: the left Shift, say, when this is the right. */
+export const otherSideHeld = (held: ReadonlyArray<Definition>, key: Definition): boolean =>
+  modifierOf(key.key) !== undefined && held.some((each) => each.key === key.key && each.code !== key.code)
 
 /** Each layout's Shift: the character the same key types with Shift held, by the key's code. */
 const shifted = new Map<Keyboard.Layout, ReadonlyMap<string, string>>(

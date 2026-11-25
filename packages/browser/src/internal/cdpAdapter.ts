@@ -104,6 +104,7 @@ export const capabilities = (
       entry("pauseOnStart.workers", "supported"),
       entry("input.keyboardLayout", "supported"),
       entry("input.mediaKeys", "supported"),
+      entry("input.modifierSides", "supported"),
       entry("initScripts.workers", "supported", ["dedicated workers started after the script was declared"]),
       entry(
         "pauseOnStart.popups",

@@ -84,6 +84,18 @@ describe("Keys by code", () => {
     assert.isFalse(Keys.placedOffUs("KeyA", "de"))
     assert.isFalse(Keys.placedOffUs("Numpad1", "fr"))
     assert.isFalse(Keys.placedOffUs("q", "fr"))
+    // With Shift, the character Shift makes there: `"` on `de`'s Digit2 is on a US keyboard's Quote
+    assert.isFalse(Keys.placedOffUs("Digit2", "de"))
+    assert.isTrue(Keys.placedOffUs("Digit2", "de", true))
+    assert.isFalse(Keys.placedOffUs("KeyA", "us", true))
+  })
+
+  it("tells a modifier held on its other side", () => {
+    const left = Keys.definition("ShiftLeft")!
+    const right = Keys.definition("ShiftRight")!
+    assert.isTrue(Keys.otherSideHeld([left], right))
+    assert.isFalse(Keys.otherSideHeld([right], right))
+    assert.isFalse(Keys.otherSideHeld([left], Keys.definition("ControlRight")!))
   })
 })
 
