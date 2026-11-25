@@ -945,8 +945,7 @@ export const declarations = (
               ).length
             const read = `return fetch('/cached.js?released').then((r) => r.status)`
             yield* Effect.scoped(Effect.gen(function*() {
-              yield* page.route(`${origin}/cached.js*`, () =>
-                Route.continue)
+              yield* page.route(`${origin}/cached.js*`, () => Route.continue)
               assert.strictEqual(yield* run(page, origin, read), 200)
             }))
             assert.strictEqual(yield* run(page, origin, read), 200)
@@ -993,9 +992,7 @@ export const declarations = (
               (server) =>
                 Effect.promise(() =>
                   new Promise<void>((resolve) => {
-                    server.close(() =>
-                      resolve()
-                    )
+                    server.close(() => resolve())
                     server.closeAllConnections()
                   })
                 )
