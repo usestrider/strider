@@ -1431,6 +1431,13 @@ export interface Locator extends ReadonlyLocator {
    * Unlike `click`, it isn't guarded: if the page covers the element after the checks, whatever covers it gets the
    * move.
    *
+   * **Gotchas**
+   *
+   * On Chromium, moving the pointer from the page into a cross-site frame fires no `mouseout` or `mouseleave` in the
+   * page, and the page's `:hover` stays where it was: a menu in the page that closes on `mouseleave` stays open while
+   * the pointer is in the frame. The frame itself sees the pointer leave when it moves out. Firefox and WebKit fire
+   * every event in each document the pointer crosses, frames nested in frames included.
+   *
    * **Example** (Signing out from a menu that opens on hover)
    *
    * ```ts import.meta.vitest
@@ -1759,9 +1766,16 @@ export interface Locator extends ReadonlyLocator {
   selectText(options?: ActionOptions | undefined): ActionEffect
 
   /**
-   * Chooses options of a `<select>`, by value, label, or index. Checks: visible, enabled.
+   * Chooses options of a `<select>`, by value, label, or index, and succeeds with the values of the options it
+   * selected. Checks: visible, enabled.
    *
    * **Details**
+   *
+   * The values are those of the chosen options that are still selected once `input` and `change` have run, read
+   * as they are then, in document order. The action selects every matching option on a `<select>` with
+   * `multiple`, and only the matching option that comes last on one without it, so that gives one value; an empty
+   * list of choices deselects every option and gives `[]`. Event handlers can change what the action selected, so
+   * the list can be shorter, or empty, when one selects another option. A `trial` selects nothing and gives `[]`.
    *
    * The options are chosen from an isolated world of Strider's, with `input` and `change` dispatched as for a
    * user's choice. An option that isn't there yet is waited for, and a timeout reports it as `NoSuchOption`. Enabled
@@ -1776,7 +1790,8 @@ export interface Locator extends ReadonlyLocator {
    * import { Effect } from "effect"
    *
    * const shipToPortugal = Effect.fn("shipToPortugal")(function*(page: Page.Page) {
-   *   yield* page.getByLabel("Country").selectOption({ label: "Portugal" })
+   *   const selected = yield* page.getByLabel("Country").selectOption({ label: "Portugal" })
+   *   yield* Effect.log(`Selected ${selected.join(", ")}`)
    * })
    * ```
    *
@@ -1785,7 +1800,7 @@ export interface Locator extends ReadonlyLocator {
   selectOption(
     choice: SelectOption | ReadonlyArray<SelectOption>,
     options?: ActionOptions | undefined
-  ): ActionEffect
+  ): Effect.Effect<ReadonlyArray<string>, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
    * Sets the files of a file input. Checks: none.
    *
@@ -2053,6 +2068,106 @@ export interface ReadonlyFrameLocator extends Queries<ReadonlyLocator> {
    * ```
    */
   frame(iframe: ReadonlyLocator): ReadonlyFrameLocator
+  /**
+   * Searches this frame's document and the frames under it, at any depth, but not its parents.
+   *
+   * **Example** (Finding a button somewhere inside a checkout frame)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const payLabel = Effect.fn("payLabel")(function*(page: Page.ReadonlyPage) {
+   *   const checkout = page.frame(page.locator("iframe#checkout"))
+   *   return yield* checkout.anyFrame.getByRole("button", { name: "Pay" }).readText
+   * })
+   * ```
+   */
+  readonly anyFrame: ReadonlyAnyFrameLocator
+}
+
+/**
+ * A search of a document and the frames under it, at any depth, for the frame a chain matches in: its locators
+ * act in that one frame.
+ *
+ * **Details**
+ *
+ * Each part of a chain up to the next frame boundary is tested in every document of the search, so a chain never
+ * matches across a frame boundary. When one document has matches, the operation goes on there, with the usual
+ * strictness inside it. When none has, it is the same as a frame that isn't there yet: reads fail with `NoMatch`,
+ * `count` returns 0, and actions and expectations wait. A frame with no document yet matches nothing and doesn't
+ * hold the search up.
+ *
+ * **Gotchas**
+ *
+ * - When more than one document has matches, every operation fails with `Locator.StrictViolation`, `count` and
+ *   `all` included, rather than picking one: which frame loaded first doesn't decide.
+ * - `and` and `or` take operands built from the same search; `filter({ has })` takes a relative locator, as
+ *   anywhere.
+ *
+ * **Example** (Reading a label in whichever frame holds it)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const brand = Effect.fn("brand")(function*(page: Page.ReadonlyPage) {
+ *   return yield* page.anyFrame.getByTestId("card-brand").readText
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface ReadonlyAnyFrameLocator extends Queries<ReadonlyLocator> {
+  /**
+   * Enters the frame an iframe this search found holds. The entered frame's own subframes aren't searched; use
+   * its `anyFrame` for that.
+   *
+   * **Example** (Entering a frame found by the search)
+   *
+   * ```ts import.meta.vitest
+   * import { Page } from "@usestrider/browser"
+   * import { Effect } from "effect"
+   *
+   * const total = Effect.fn("total")(function*(page: Page.ReadonlyPage) {
+   *   const checkout = page.anyFrame.frame(page.anyFrame.locator("iframe#checkout"))
+   *   return yield* checkout.getByTestId("total").readText
+   * })
+   * ```
+   */
+  frame(iframe: ReadonlyLocator): ReadonlyFrameLocator
+}
+
+/**
+ * A search across frames on a page you control, whose locators can act.
+ *
+ * **Example** (Paying in whichever frame holds the button)
+ *
+ * ```ts import.meta.vitest
+ * import { Page } from "@usestrider/browser"
+ * import { Effect } from "effect"
+ *
+ * const pay = Effect.fn("pay")(function*(page: Page.Page) {
+ *   yield* page.anyFrame.getByRole("button", { name: "Pay" }).click()
+ * })
+ * ```
+ *
+ * @stability unstable
+ * @category models
+ * @since 0.1.0
+ */
+export interface AnyFrameLocator extends ReadonlyAnyFrameLocator {
+  getByRole(role: AriaRole.AriaRole, options?: RoleOptions | undefined): Locator
+  getByText(text: string | RegExp, options?: TextOptions | undefined): Locator
+  getByLabel(text: string | RegExp, options?: TextOptions | undefined): Locator
+  getByPlaceholder(text: string | RegExp, options?: TextOptions | undefined): Locator
+  getByAltText(text: string | RegExp, options?: TextOptions | undefined): Locator
+  getByTitle(text: string | RegExp, options?: TextOptions | undefined): Locator
+  getByTestId(id: string | RegExp): Locator
+  locator(selector: string | XPath): Locator
+  frame(iframe: ReadonlyLocator): FrameLocator
 }
 
 /**
@@ -2085,6 +2200,7 @@ export interface FrameLocator extends ReadonlyFrameLocator {
   getByTestId(id: string | RegExp): Locator
   locator(selector: string | XPath): Locator
   frame(iframe: ReadonlyLocator): FrameLocator
+  readonly anyFrame: AnyFrameLocator
   readonly resolve: Effect.Effect<Frame.Frame, LocatorError | Target.TargetGone | Deadline.Timeout>
   /**
    * Adds a `<script>` element to the iframe's current document, returning it once it has loaded, run, or been
@@ -2153,8 +2269,9 @@ export interface FrameLocator extends ReadonlyFrameLocator {
  *
  * **Details**
  *
- * `candidates` describes each match. When exactly one of them is visible, `suggestions` holds the locator with
- * `.filter({ visible: true })` added, which matches it; otherwise it's empty.
+ * `count` is how many elements match, and `candidates` describes the first ten of them. When exactly one of all
+ * the matches is visible, `suggestions` holds the locator with `.filter({ visible: true })` added, which matches
+ * it; otherwise it's empty.
  *
  * @stability unstable
  * @category reasons
@@ -2162,12 +2279,14 @@ export interface FrameLocator extends ReadonlyFrameLocator {
  */
 export class StrictViolation extends Schema.Error<StrictViolation>("@usestrider/browser/Locator/StrictViolation")({
   _tag: Schema.tag("StrictViolation"),
+  /** How many elements match, which may be more than `candidates` describes. */
+  count: Schema.Number,
   candidates: Schema.Array(Schema.Struct({ description: Schema.String, visible: Schema.Boolean })),
   suggestions: Schema.Array(Schema.String),
   hint: Schema.String
 }) {
   override get message(): string {
-    return `${this.candidates.length} matches (${this.hint})`
+    return `${this.count} matches (${this.hint})`
   }
 }
 

@@ -33,7 +33,7 @@ export const scriptTags = <R>(
     Effect.gen(function*() {
       const served = yield* site
       const page = yield* newPage
-      yield* page.goto(`${served.origin}/fixture?html=x`)
+      yield* page.goto(`${served.origin}/fixture?html=x`, { waitUntil: "load" })
       const element = yield* page.addScriptTag({ url: script(served.origin, "window.fromUrl = 'ran'") })
       assert.strictEqual(yield* global(page, "fromUrl"), "ran")
       assert.strictEqual(yield* element.evaluate((tag) => tag.src.includes("/script?")), true)
@@ -43,7 +43,7 @@ export const scriptTags = <R>(
     Effect.gen(function*() {
       const served = yield* site
       const page = yield* newPage
-      yield* page.goto(`${served.origin}/fixture?html=x`)
+      yield* page.goto(`${served.origin}/fixture?html=x`, { waitUntil: "load" })
       const error = yield* page.addScriptTag({ url: "http://127.0.0.1:9/unreachable.js" }).pipe(Effect.flip)
       assert.strictEqual(reasonOf(error)?._tag, "ResourceFailed")
     }).pipe(Effect.scoped))
@@ -52,7 +52,7 @@ export const scriptTags = <R>(
     Effect.gen(function*() {
       const served = yield* site
       const page = yield* newPage
-      yield* page.goto(`${served.origin}/fixture?html=x`)
+      yield* page.goto(`${served.origin}/fixture?html=x`, { waitUntil: "load" })
       yield* page.addScriptTag({ source: "window.inline = document.currentScript.tagName" })
       assert.strictEqual(yield* global(page, "inline"), "SCRIPT")
     }).pipe(Effect.scoped))
@@ -62,7 +62,7 @@ export const scriptTags = <R>(
       if (name === "Firefox") return
       const served = yield* site
       const page = yield* newPage
-      yield* page.goto(`${served.origin}/csp?html=x`)
+      yield* page.goto(`${served.origin}/csp?html=x`, { waitUntil: "load" })
       const source = "window.refusedHere = true"
       yield* page.evaluateInMainWorld((source: string) => {
         const element = document.createElement("script")
@@ -81,7 +81,7 @@ export const scriptTags = <R>(
     Effect.gen(function*() {
       const served = yield* site
       const page = yield* newPage
-      yield* page.goto(`${served.origin}/fixture?html=x`)
+      yield* page.goto(`${served.origin}/fixture?html=x`, { waitUntil: "load" })
       const channel = Handles.page(page).entry.events.console
       const before = channel.subscribers.size
       yield* page.addScriptTag({ source: "window.injected = true" })
@@ -111,7 +111,7 @@ export const scriptTags = <R>(
     Effect.gen(function*() {
       const served = yield* site
       const page = yield* newPage
-      yield* page.goto(`${served.origin}/fixture?html=x`)
+      yield* page.goto(`${served.origin}/fixture?html=x`, { waitUntil: "load" })
       yield* page.evaluateInMainWorld(() => {
         Reflect.set(window, "inlineModule", new Promise((resolve) => Reflect.set(window, "markInline", resolve)))
       })
@@ -150,7 +150,7 @@ export const scriptTags = <R>(
     Effect.gen(function*() {
       const served = yield* site
       const page = yield* newPage
-      yield* page.goto(`${served.origin}/fixture?html=x`)
+      yield* page.goto(`${served.origin}/fixture?html=x`, { waitUntil: "load" })
       yield* page.evaluateInMainWorld(() => {
         Reflect.set(window, "moduleStarted", new Promise((resolve) => Reflect.set(window, "notifyStarted", resolve)))
         Reflect.set(window, "moduleFinished", new Promise((resolve) => Reflect.set(window, "notifyFinished", resolve)))
@@ -175,7 +175,7 @@ export const scriptTags = <R>(
     Effect.gen(function*() {
       const served = yield* site
       const page = yield* newPage
-      yield* page.goto(`${served.origin}/csp-report-only?html=x`)
+      yield* page.goto(`${served.origin}/csp-report-only?html=x`, { waitUntil: "load" })
       yield* page.addScriptTag({ source: "window.reportedInline = true" })
       yield* page.addScriptTag({ url: script(served.crossSite, "window.reportedUrl = true") })
       assert.strictEqual(yield* global(page, "reportedInline"), true)
@@ -192,7 +192,7 @@ export const scriptTags = <R>(
       )
       const file = nodePath.join(directory, "injected.js")
       yield* Effect.promise(() => fs.writeFile(file, "window.fromPath = 'ran'"))
-      yield* page.goto(`${served.origin}/fixture?html=x`)
+      yield* page.goto(`${served.origin}/fixture?html=x`, { waitUntil: "load" })
       const element = yield* page.addScriptTag({ path: file })
       assert.strictEqual(yield* global(page, "fromPath"), "ran")
       assert.isTrue((yield* element.evaluate((tag) => tag.text)).endsWith(`\n//# sourceURL=${file}`))
@@ -202,7 +202,7 @@ export const scriptTags = <R>(
     Effect.gen(function*() {
       const served = yield* site
       const page = yield* newPage
-      yield* page.goto(`${served.origin}/fixture?html=x`)
+      yield* page.goto(`${served.origin}/fixture?html=x`, { waitUntil: "load" })
       yield* page.addScriptTag({ source: "" }, { id: "injected" })
       assert.strictEqual(
         yield* page.evaluateInMainWorld(() => document.querySelector("script#injected")?.tagName),
@@ -214,7 +214,7 @@ export const scriptTags = <R>(
     Effect.gen(function*() {
       const served = yield* site
       const page = yield* newPage
-      yield* page.goto(`${served.origin}/csp?html=x`)
+      yield* page.goto(`${served.origin}/csp?html=x`, { waitUntil: "load" })
       const inline = yield* page.addScriptTag({ source: "window.refused = true" }).pipe(Effect.flip)
       const refused = reasonOf(inline)
       assert.strictEqual(refused?._tag, "RefusedByPolicy")
@@ -237,7 +237,8 @@ export const scriptTags = <R>(
       yield* page.goto(
         `${served.origin}/fixture?html=${
           encodeURIComponent(`<iframe src="${served.crossSite}/fixture?html=frame"></iframe>`)
-        }`
+        }`,
+        { waitUntil: "load" }
       )
       const frame = page.frame(page.locator("iframe"))
       const element = yield* frame.addScriptTag({ source: "window.inFrame = location.host" })
@@ -255,7 +256,8 @@ export const scriptTags = <R>(
       yield* page.goto(
         `${served.origin}/fixture?html=${
           encodeURIComponent(`<iframe src="${served.crossSite}/csp?html=frame"></iframe>`)
-        }`
+        }`,
+        { waitUntil: "load" }
       )
       const error = yield* page.frame(page.locator("iframe")).addScriptTag({ source: "window.refused = true" }).pipe(
         Effect.flip

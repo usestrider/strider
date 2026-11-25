@@ -304,7 +304,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
           const { url } = yield* fixture(connect)
           yield* Effect.scoped(Effect.gen(function*() {
             const page = yield* SharedContext.newPage
-            yield* page.goto(url)
+            yield* page.goto(url, { waitUntil: "load" })
             const evaluation = yield* page.evaluateInMainWorld(() => {
               ;(window as { __pending?: boolean }).__pending = true
               return new Promise(() => {})
@@ -332,7 +332,7 @@ export const events = (name: string, backend: Layer.Layer<Browser.Browser, unkno
             const services = yield* Layer.buildWithScope(Layer.fresh(backend), browserScope)
             const page = yield* Effect.gen(function*() {
               const page = yield* Browser.newPage()
-              yield* page.goto(url)
+              yield* page.goto(url, { waitUntil: "load" })
               return page
             }).pipe(Scope.provide(holder), Effect.provideContext(services))
             const evaluation = yield* page.evaluateInMainWorld(() => {

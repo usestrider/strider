@@ -145,6 +145,7 @@ export const endPage = (state: State, page: PageEntry, reason: L1Target.CloseRea
   state.touchCapture.delete(page.id)
   state.pressedIn.delete(page.id)
   state.pressedOn.delete(page.id)
+  state.pointerOn.delete(page.id)
   state.escapeCanceled.delete(page.id)
   state.drags.delete(page.id)
   state.interceptingDrags.delete(page.id)

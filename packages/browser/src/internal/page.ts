@@ -406,6 +406,9 @@ export const make = (owner: PageOwner): Page.Page => {
     ...observeMembers(owner),
     ...queries,
     frame: (iframe) => LocatorImpl.pageFrame({ runtime, page: entry, grant: owner.grant }, iframe),
+    get anyFrame() {
+      return LocatorImpl.anyFrameLocator({ runtime, page: entry, grant: owner.grant }, [])
+    },
     frameById: (id) => FrameImpl.byId({ runtime, page: entry, grant: owner.grant }, id),
     get viewportSize() {
       return Effect.gen(function*() {
@@ -491,7 +494,7 @@ export const make = (owner: PageOwner): Page.Page => {
         JSHandle.Serialized<A>,
         Page.PageError | Target.TargetGone | Deadline.Timeout
       >,
-    capability: (capability) => Capabilities.acquire(runtime, entry, capability, owner.grant),
+    capability: (capability, options) => Capabilities.acquire(runtime, entry, capability, options, owner.grant),
     context: owner.context,
     goto: (url, options) => {
       const result = HttpUrl.fromString(url)

@@ -81,6 +81,46 @@ describe("A request in a log", () => {
     }))
 })
 
+describe("NetworkResponse encoding", () => {
+  const response = (
+    serverAddress: Option.Option<NetworkResponse.ServerAddress>,
+    securityDetails: Option.Option<NetworkResponse.SecurityDetails>
+  ) =>
+    new NetworkResponse.NetworkResponse({
+      hop: "Q1.0" as NetworkRequest.HopId,
+      url: "https://example.com/" as NetworkResponse.NetworkResponse["url"],
+      status: 200 as NetworkResponse.StatusCode,
+      statusText: "OK",
+      httpVersion: Option.some("h2"),
+      serverAddress,
+      securityDetails,
+      headers: Headers.empty,
+      servedBy: "network",
+      at: 0 as NetworkResponse.NetworkResponse["at"]
+    })
+  const codec = Schema.toCodecJson(NetworkResponse.NetworkResponse)
+
+  it("round-trips the server address and TLS details, present or not", () => {
+    const present = response(
+      Option.some(new NetworkResponse.ServerAddress({ ip: "127.0.0.1", port: 8443 })),
+      Option.some(
+        new NetworkResponse.SecurityDetails({
+          protocol: Option.some("TLS 1.3"),
+          subjectName: Option.some("example.com"),
+          issuer: Option.none(),
+          validFrom: Option.some(1794897046),
+          validTo: Option.some(4948497046)
+        })
+      )
+    )
+    for (const sent of [present, response(Option.none(), Option.none())]) {
+      const decoded = Schema.decodeUnknownSync(codec)(JSON.parse(JSON.stringify(Schema.encodeSync(codec)(sent))))
+      assert.deepStrictEqual(decoded.serverAddress, sent.serverAddress)
+      assert.deepStrictEqual(decoded.securityDetails, sent.securityDetails)
+    }
+  })
+})
+
 const recorded = (sent: NetworkRequest.NetworkRequest, body: Uint8Array | undefined): Har.Recorded => ({
   request: sent,
   hop: Option.none(),
@@ -297,6 +337,8 @@ describe("A HAR an export writes", () => {
           status: response.status as NetworkResponse.StatusCode,
           statusText: "OK",
           httpVersion: Option.some("http/1.1"),
+          serverAddress: Option.none(),
+          securityDetails: Option.none(),
           headers: Headers.fromInput(response.headers),
           servedBy: "network",
           at: at(2)
@@ -321,7 +363,9 @@ describe("A HAR an export writes", () => {
         transferBytes: Option.none(),
         bodyBytes: Option.none(),
         at: at(3),
-        httpVersion: Option.none()
+        httpVersion: Option.none(),
+        serverAddress: Option.none(),
+        securityProtocol: Option.none()
       }),
       body: Option.some(bodies.response),
       requestBody: Option.some(Option.some(bodies.request)),
@@ -438,7 +482,15 @@ describe("A HAR an export writes", () => {
     const counted = (transferBytes: Option.Option<number>, bodyBytes: Option.Option<number>) =>
       entryOf({
         ...hop,
-        end: Option.some({ _tag: "Finished", transferBytes, bodyBytes, at: at(3), httpVersion: Option.none() })
+        end: Option.some({
+          _tag: "Finished",
+          transferBytes,
+          bodyBytes,
+          at: at(3),
+          httpVersion: Option.none(),
+          serverAddress: Option.none(),
+          securityProtocol: Option.none()
+        })
       })
         .response
     const known = counted(Option.some(300), Option.some(40))

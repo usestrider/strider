@@ -35,6 +35,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("network.timing.redirect", "unsupported", ["redirect responses omit native timing origins"]),
       entry("network.timing", "unsupported", ["timing collection requires a newly created context"]),
       entry("input.topLevelDesignMode", "unsupported", [noInput]),
+      entry("input.frameBoundaries", "unsupported", [noInput]),
       entry("webSocketRouting", "partial", [
         "explicit script consent and bestEffort timing; admission ceilings; main-world WebSocket only"
       ]),
@@ -96,6 +97,12 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
         "the browser's \"Fetch API cannot load … due to access control checks\" arrives as an uncaught exception, " +
         "with no source: WebKit sends it on its `javascript` channel at level `error`, which Strider reads as an " +
         "uncaught exception"
+      ]),
+      entry("console.method", "partial", [
+        "`console.timeLog` reads as `timeEnd`, since WebKit sends both as one `timing` message",
+        "`console.count` reads as `debug`, since WebKit sends it as a plain message at level `debug`",
+        "`console.countReset` of a counter that doesn't exist reads as `warn`, since WebKit sends it as a warning",
+        "`console.countReset` of a counter that exists writes no message, since WebKit sends none for it"
       ]),
       entry("prompts", "unsupported", [
         "stock WebKit's inspector has no Dialog domain: a dialog blocks the page unreported"
@@ -276,6 +283,7 @@ export const launchedCapabilities = (info: Browser.Info, video = false) => {
       "a page a page opens is found when the browser lists it, and isn't paused"
     ]],
     "input.topLevelDesignMode": ["supported", []],
+    "input.frameBoundaries": ["supported", []],
     "input.native": ["supported", ["Automation's simulated input, which the page trusts"]],
     "input.insertText": ["supported", [
       "Automation inserts text only by key, so Strider inserts it with the page's editing command, which fires a trusted beforeinput and input and no key events"

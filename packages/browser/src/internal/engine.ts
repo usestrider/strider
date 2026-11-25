@@ -19,7 +19,9 @@
  *   on the way.
  * - **Text** is an element's text content in the flat tree (a shadow host's shadow tree, a slot's assigned
  *   nodes), skipping `script`, `style`, `noscript` and `template`, with a button-like `input`'s value, and
- *   whitespace collapsed and trimmed. Not `innerText`, which depends on layout and differs between engines.
+ *   whitespace collapsed and trimmed. Not `innerText`, which depends on layout and differs between engines;
+ *   `toHaveText` and `toContainText` read an HTML element's `innerText` only when asked to (`useInnerText`), and
+ *   collapse its whitespace the same way.
  * - **`getByText`** matches the smallest element that says it: its text matches and no child element's does.
  *   The document's `head` isn't searched.
  * - **`getByRole`** takes the first role token the engine knows from `role`, or else the implicit role under
@@ -34,9 +36,17 @@
 
 import * as Schema from "effect/Schema"
 
-/** How a query matches text. */
+/**
+ * How a query matches text. An expectation's string compares without case when it has `ignoreCase`; a regular
+ * expression carries its case in its flags.
+ */
 export type TextMatcher =
-  | { readonly _tag: "String"; readonly value: string; readonly exact: boolean }
+  | {
+    readonly _tag: "String"
+    readonly value: string
+    readonly exact: boolean
+    readonly ignoreCase?: boolean | undefined
+  }
   | { readonly _tag: "RegExp"; readonly source: string; readonly flags: string }
 
 /** One step of a locator, applied to the matches of the steps before it. */
@@ -81,6 +91,12 @@ export type Step =
    * the iframe's document. L1 splits steps at each one before resolution; validation receives the complete query.
    */
   | { readonly _tag: "Frame" }
+  /**
+   * A search across frames: the steps after it, up to the next frame boundary, resolve in whichever one document
+   * of the current one and the frames under it, at any depth, they match in. L1 resolves it before the engine
+   * sees the steps.
+   */
+  | { readonly _tag: "AnyFrame" }
   /**
    * A snapshot's ref: the one node it was given to, in the document and engine that gave
    * it, never another. L1 checks the document; the engine its generation and the node.
@@ -190,8 +206,16 @@ export type Expectation =
   | { readonly _tag: "Focused" }
   | { readonly _tag: "Editable" }
   | { readonly _tag: "Empty" }
-  /** The whole text of the one match, or with `list`, of each match in order. */
-  | { readonly _tag: "Text"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
+  /**
+   * The whole text of the one match, or with `list`, of each match in order; with `useInnerText`, the rendered
+   * `innerText` instead of the text content.
+   */
+  | {
+    readonly _tag: "Text"
+    readonly expected: ReadonlyArray<TextMatcher>
+    readonly list: boolean
+    readonly useInnerText: boolean
+  }
   | { readonly _tag: "Role"; readonly expected: string }
   | { readonly _tag: "AccessibleName"; readonly expected: TextMatcher; readonly ignoreCase: boolean }
   /** The one match's accessible description or error message matches; with `not`, it doesn't. */
@@ -203,7 +227,16 @@ export type Expectation =
   }
   /** The raw class string of one match, or each match in order. */
   | { readonly _tag: "Class"; readonly expected: ReadonlyArray<TextMatcher>; readonly list: boolean }
-  | { readonly _tag: "ContainsText"; readonly expected: TextMatcher }
+  /**
+   * The one match's text contains its entry, or with `list`, the entries are contained in a subsequence of the
+   * matches, in order; an empty list holds when nothing matches.
+   */
+  | {
+    readonly _tag: "ContainsText"
+    readonly expected: ReadonlyArray<TextMatcher>
+    readonly list: boolean
+    readonly useInnerText: boolean
+  }
   | { readonly _tag: "Value"; readonly expected: TextMatcher }
   | { readonly _tag: "Values"; readonly expected: ReadonlyArray<TextMatcher> }
   | { readonly _tag: "Attribute"; readonly name: string; readonly expected: TextMatcher | null }
@@ -334,6 +367,8 @@ export type Request =
   | { readonly op: "validationStart"; readonly token: string; readonly full: boolean }
   | { readonly op: "validationStop"; readonly token: string }
   | { readonly op: "count"; readonly steps: ReadonlyArray<Step> }
+  /** Every match's count, and the first ten described, as a strictness failure gives them, whatever their count. */
+  | { readonly op: "candidates"; readonly steps: ReadonlyArray<Step> }
   | { readonly op: "visible"; readonly steps: ReadonlyArray<Step> }
   | {
     readonly op: "act"
@@ -359,7 +394,13 @@ export type Request =
   }
   /** Removes the guard an action armed, and says whether it stopped the gesture. */
   | { readonly op: "disarm" }
-  | { readonly op: "fillGuard"; readonly steps: ReadonlyArray<Step>; readonly ancestor: boolean }
+  | {
+    readonly op: "fillGuard"
+    readonly steps: ReadonlyArray<Step>
+    readonly ancestor: boolean
+    /** For an iframe on the way: the identity its lookup answered, which the guarded iframe must still have. */
+    readonly identity?: string
+  }
   | { readonly op: "fillDisarm" }
   /**
    * Inserts text with the editing command in this document's focused element, after a cancelable `beforeinput`
@@ -381,6 +422,20 @@ export type Request =
     readonly provisional?: boolean | undefined
   }
   | { readonly op: "expectStop"; readonly token: string }
+  /**
+   * A wait for the first change the page makes (a mutation, an `input`, `change` or focus event, an animation frame)
+   * since `token` was armed, or `cap` milliseconds: what a check made outside the engine waits on before it checks
+   * again. It answers at once when the change came before it, and with `token: null` arms only. Either way it answers
+   * with a token armed as it answers, for the next wait. Its steps only route it to the document their match is in.
+   */
+  | {
+    readonly op: "change"
+    readonly steps: ReadonlyArray<Step>
+    readonly token: string | null
+    readonly cap: number
+  }
+  /** Releases a watch `change` armed, ending a wait on it without arming another. */
+  | { readonly op: "unwatch"; readonly token: string }
   | { readonly op: "title" }
   | { readonly op: "role"; readonly steps: ReadonlyArray<Step> }
   /**
@@ -396,6 +451,8 @@ export type Request =
     readonly scroll: boolean
     readonly clip?: Clip
     readonly point: { readonly x: number; readonly y: number } | null
+    /** The identity the iframe's lookup answered: the answer says whether the iframe found has it still. */
+    readonly identity?: string
   }
   /**
    * The accessibility tree of the document, or of the one match's subtree, with inferred
@@ -416,6 +473,13 @@ export type Request =
   | { readonly op: "html" }
   /** Draws the page's overlays as they now are, over the document, or removes them all when there are none. */
   | { readonly op: "overlay"; readonly overlays: ReadonlyArray<OverlayItem>; readonly hidden: boolean }
+  /**
+   * Covers every element the steps match with a box of `color` over its border box, for a capture: the boxes
+   * stay until `unmask` with the same token.
+   */
+  | { readonly op: "mask"; readonly steps: ReadonlyArray<Step>; readonly color: string; readonly token: string }
+  /** Removes the boxes `mask` drew with this token, and no others. */
+  | { readonly op: "unmask"; readonly token: string }
 
 /** One overlay: the caller's HTML, or a chapter's title card, fading out once it is `leaving`. */
 export type OverlayItem =
@@ -469,7 +533,9 @@ export const Response = Schema.Union([
     /** For `Checked`: whether it is checked. */
     checked: Schema.NullOr(Schema.Boolean),
     /** For `Fill`: whether the value is to be typed (focused, contents selected) or was set. */
-    fill: Schema.NullOr(Schema.Literals(["type", "set", "guarded"]))
+    fill: Schema.NullOr(Schema.Literals(["type", "set", "guarded"])),
+    /** For `Select`, once applied: the values of the options it selected, in document order. */
+    selected: Schema.NullOr(Schema.Array(Schema.String))
   }),
   Schema.TaggedStruct("NotReady", {
     reason: NotReady,
@@ -485,13 +551,19 @@ export const Response = Schema.Union([
   Schema.TaggedStruct("Final", { final: Final }),
   Schema.TaggedStruct("Guarded", { blocked: Schema.NullOr(Schema.String) }),
   Schema.TaggedStruct("Overlaid", {}),
+  /** How many elements a `mask` covered, or 0 for `unmask`. */
+  Schema.TaggedStruct("Masked", { count: Schema.Number }),
+  /** A `mask` whose color isn't a CSS color: nothing was drawn. */
+  Schema.TaggedStruct("InvalidColor", {}),
   Schema.TaggedStruct("Inserted", { inserted: Schema.Boolean }),
   /** The focused element is the `index`th of the document's frames, in the order a `"iframe, frame"` query finds them. */
   Schema.TaggedStruct("InFrame", { index: Schema.Number }),
   Schema.TaggedStruct("FillGuard", {
     blocked: Schema.NullOr(Schema.String),
     unsafe: Schema.Boolean,
-    accepted: Schema.Boolean
+    accepted: Schema.Boolean,
+    /** Given an identity, whether the iframe guarded has it: the same iframe, holding the same frame. */
+    held: Schema.optionalKey(Schema.Boolean)
   }),
   Schema.TaggedStruct("Read", { value: Schema.NullOr(Schema.Union([Schema.String, Schema.Boolean])) }),
   Schema.TaggedStruct("NoMatch", {}),
@@ -507,7 +579,20 @@ export const Response = Schema.Union([
      */
     provisional: Schema.optional(Schema.Boolean)
   }),
-  Schema.TaggedStruct("Strict", { candidates: Schema.Array(Candidate), count: Schema.Number }),
+  Schema.TaggedStruct("Watching", {
+    /** Whether the page changed since the token waited on was armed; a token this document never armed counts. */
+    changed: Schema.Boolean,
+    /** A watch armed as this answer was made, for the next wait. */
+    token: Schema.String
+  }),
+  Schema.TaggedStruct("Strict", {
+    candidates: Schema.Array(Candidate),
+    count: Schema.Number,
+    /** How many of all the matches are visible, the ones past the ten described included. */
+    visible: Schema.Number,
+    /** How many frames matched, for a search across frames that matched in more than one. */
+    frames: Schema.optionalKey(Schema.Number)
+  }),
   Schema.TaggedStruct("InvalidSelector", {
     selector: Schema.String,
     message: Schema.String,
@@ -527,7 +612,9 @@ export const Response = Schema.Union([
     /** Why the iframe isn't hit at the point given (`Covered` or `NoPointerEvents`), or `null` when it is. */
     covered: Schema.NullOr(NotReady),
     /** This document's scroll offset. */
-    scroll: Point
+    scroll: Point,
+    /** Given an identity, whether the iframe found has it: the same iframe, holding the same frame. */
+    held: Schema.optionalKey(Schema.Boolean)
   }),
   Schema.TaggedStruct("Snapshot", { root: SnapNode, generation: Schema.Number }),
   Schema.TaggedStruct("Explained", {
@@ -658,6 +745,7 @@ export function engine(render: (root: SnapNode) => string) {
     removeEventListener: method(EventTarget.prototype, "removeEventListener"),
     isContentEditable: getter(HTMLElement.prototype, "isContentEditable"),
     tabIndex: getter(HTMLElement.prototype, "tabIndex"),
+    innerText: getter(HTMLElement.prototype, "innerText"),
     activeElement: getter(Document.prototype, "activeElement"),
     documentElement: getter(Document.prototype, "documentElement"),
     doctype: getter(Document.prototype, "doctype"),
@@ -839,6 +927,76 @@ export function engine(render: (root: SnapNode) => string) {
   let drawOverlays: ((request: Extract<Request, { op: "overlay" }>) => Response) | undefined
 
   /**
+   * The element a capture's masks are drawn in, under a closed shadow root of its own: `null` while there are
+   * none. Like the overlays' host, queries, snapshots and the document's HTML leave it out, and it ignores the
+   * pointer.
+   */
+  let maskHost: Element | null = null
+  let maskRoot: ShadowRoot | null = null
+  /** Each capture's boxes, by its token, so one capture's end removes only its own. */
+  const maskBoxes = new Map<string, Array<Element>>()
+  /** Whether a node is one of the library's own drawings, which the page a query sees never includes. */
+  const drawn = (node: Node): boolean => node === overlayHost || node === maskHost
+  const maskDom = {
+    appendChild: method(Node.prototype, "appendChild"),
+    remove: method(Element.prototype, "remove"),
+    setAttribute: method(Element.prototype, "setAttribute"),
+    attachShadow: method(Element.prototype, "attachShadow"),
+    style: getter(HTMLElement.prototype, "style"),
+    setProperty: method(CSSStyleDeclaration.prototype, "setProperty"),
+    getPropertyValue: method(CSSStyleDeclaration.prototype, "getPropertyValue")
+  }
+  const MASK_HOST = "all:initial;position:absolute;left:0;top:0;width:0;height:0;overflow:visible;" +
+    "z-index:2147483647;pointer-events:none;display:block"
+  const mask = (request: Extract<Request, { op: "mask" }>): Response => {
+    // CSS drops a value it can't parse, which would draw an unseen box, so the color is checked by reading it back
+    // from a detached probe before anything is drawn
+    const probe = dom.createElement(document, "div") as HTMLElement
+    maskDom.setProperty(maskDom.style(probe), "background-color", request.color)
+    if (maskDom.getPropertyValue(maskDom.style(probe), "background-color") === "") return { _tag: "InvalidColor" }
+    const found = resolve(request.steps)
+    const root = dom.documentElement(document)
+    if (found.length === 0 || root === null) return { _tag: "Masked", count: 0 }
+    if (maskHost === null || maskRoot === null) {
+      maskHost = dom.createElement(document, "strider-mask")
+      maskRoot = maskDom.attachShadow(maskHost, { mode: "closed" })
+    }
+    // Last in the document, so it stacks over what came before
+    if (dom.parentNode(maskHost) !== root || dom.nextElementSibling(maskHost) !== null) {
+      maskDom.appendChild(root, maskHost)
+    }
+    maskDom.setAttribute(maskHost, "style", MASK_HOST)
+    // Boxes are placed from the host's own place, wherever its containing block puts it, so each stays over its
+    // element in the document, in a full-page capture and past the viewport too
+    const origin = dom.getBoundingClientRect(maskHost)
+    const boxes = maskBoxes.get(request.token) ?? []
+    for (const element of found) {
+      const rect = dom.getBoundingClientRect(element)
+      const box = dom.createElement(document, "div") as HTMLElement
+      maskDom.setAttribute(
+        box,
+        "style",
+        `position:absolute;left:${rect.x - origin.x}px;top:${rect.y - origin.y}px;width:${rect.width}px;` +
+          `height:${rect.height}px;pointer-events:none`
+      )
+      maskDom.setProperty(maskDom.style(box), "background-color", request.color)
+      maskDom.appendChild(maskRoot, box)
+      boxes.push(box)
+    }
+    maskBoxes.set(request.token, boxes)
+    return { _tag: "Masked", count: found.length }
+  }
+  const unmask = (token: string): Response => {
+    for (const box of maskBoxes.get(token) ?? []) maskDom.remove(box)
+    maskBoxes.delete(token)
+    if (maskBoxes.size === 0 && maskHost !== null) {
+      maskDom.remove(maskHost)
+      maskHost = maskRoot = null
+    }
+    return { _tag: "Masked", count: 0 }
+  }
+
+  /**
    * Every element under `root`, in tree order, with each open shadow root's elements after its host. An element
    * root's own open shadow root counts as under it, before its light children.
    */
@@ -855,7 +1013,7 @@ export function engine(render: (root: SnapNode) => string) {
         child = dom.nextElementSibling(child)
       ) {
         // The overlays' host is the library's own drawing, never part of the page a query sees
-        if (child === overlayHost) continue
+        if (drawn(child)) continue
         out.push(child)
         const shadow = dom.shadowRoot(child)
         if (shadow !== null) visit(shadow)
@@ -2068,7 +2226,7 @@ export function engine(render: (root: SnapNode) => string) {
     if (matcher._tag === "RegExp") return new RegExp(matcher.source, matcher.flags).test(text)
     const normalize = (value: string) => collapse(value.replace(/[\u200b\u00ad]/g, ""))
     return ignoreCase
-      ? normalize(text).toLocaleLowerCase() === normalize(matcher.value).toLocaleLowerCase()
+      ? normalize(text).toLowerCase() === normalize(matcher.value).toLowerCase()
       : normalize(text) === normalize(matcher.value)
   }
 
@@ -2204,7 +2362,7 @@ export function engine(render: (root: SnapNode) => string) {
   const query = (scope: Document | Element, step: Step): Array<Element> => {
     if (step._tag === "XPath") {
       const found = xpathQuery(scope, step.expression)
-      return overlayHost === null ? found : found.filter((element) => element !== overlayHost)
+      return overlayHost === null && maskHost === null ? found : found.filter((element) => !drawn(element))
     }
     const under = scope === document ? documentElements() : elementsUnder(scope)
     switch (step._tag) {
@@ -3021,7 +3179,7 @@ export function engine(render: (root: SnapNode) => string) {
       accepted: current?.accepted ?? false
     }
   }
-  const armFill = (steps: ReadonlyArray<Step>, ancestor: boolean) => {
+  const armFill = (steps: ReadonlyArray<Step>, ancestor: boolean, identity: string | undefined) => {
     fillDisarm()
     const matches = resolve(steps)
     const element = matches.length === 1 ? matches[0]! : null
@@ -3112,7 +3270,13 @@ export function engine(render: (root: SnapNode) => string) {
     // whose handlers may replace the target or change readiness, before installing an insertion guard.
     if (current.blocked === null) { for (const type of types) addEventListener(type, handler, true) }
     fillGuard = current
-    return { _tag: "FillGuard" as const, blocked: current.blocked, unsafe: false, accepted: false }
+    return {
+      _tag: "FillGuard" as const,
+      blocked: current.blocked,
+      unsafe: false,
+      accepted: false,
+      ...(identity === undefined ? {} : { held: element !== null && frameIdentity(element) === identity })
+    }
   }
 
   /**
@@ -3448,7 +3612,8 @@ export function engine(render: (root: SnapNode) => string) {
       point: null as { x: number; y: number } | null,
       draggable: false,
       checked: null as boolean | null,
-      fill: null as "type" | "set" | "guarded" | null
+      fill: null as "type" | "set" | "guarded" | null,
+      selected: null as ReadonlyArray<string> | null
     }
     switch (action._tag) {
       case "Point": {
@@ -3552,13 +3717,20 @@ export function engine(render: (root: SnapNode) => string) {
       }
       case "Select": {
         const select = element as HTMLSelectElement
-        const options = Array.from(select.options)
-        for (const [index, option] of options.entries()) {
-          option.selected = action.choices.some((choice) => optionMatches(option, index, choice))
+        const chosen = new Set<HTMLOptionElement>()
+        for (const [index, option] of Array.from(select.options).entries()) {
+          const matches = action.choices.some((choice) => optionMatches(option, index, choice))
+          option.selected = matches
+          if (matches) chosen.add(option)
         }
         fire(select, "input")
         fire(select, "change")
-        return answer
+        // The chosen options still selected after the events, by their current value: handlers may have changed
+        // the values and labels the choices matched, or the selection itself
+        const selected = Array.from(select.options).flatMap((option) =>
+          chosen.has(option) && option.selected ? [option.value] : []
+        )
+        return { ...answer, selected }
       }
       default:
         return answer
@@ -3612,12 +3784,33 @@ export function engine(render: (root: SnapNode) => string) {
   }
 
   // Expectations, waiting in the page
+  /** Two strings as an expectation compares them: whole, or contained, and without case when it asks. */
+  const compare = (text: string, value: string, whole: boolean, ignoreCase: boolean | undefined): boolean => {
+    const actual = ignoreCase === true ? text.toLowerCase() : text
+    const wanted = ignoreCase === true ? value.toLowerCase() : value
+    return whole ? actual === wanted : actual.includes(wanted)
+  }
+
   const expected = (matcher: TextMatcher, text: string): boolean =>
-    matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(text) : text === collapse(matcher.value)
+    matcher._tag === "RegExp"
+      ? new RegExp(matcher.source, matcher.flags).test(text)
+      : compare(text, collapse(matcher.value), true, matcher.ignoreCase)
+
+  /** Whether a text contains a string entry, or matches a regular expression one. */
+  const contains = (matcher: TextMatcher, text: string): boolean =>
+    matcher._tag === "RegExp"
+      ? new RegExp(matcher.source, matcher.flags).test(text)
+      : compare(text, collapse(matcher.value), false, matcher.ignoreCase)
 
   /** A value as written, such as a class or an attribute, matched without collapsing its whitespace. */
   const rawMatches = (matcher: TextMatcher, value: string): boolean =>
-    matcher._tag === "RegExp" ? new RegExp(matcher.source, matcher.flags).test(value) : value === matcher.value
+    matcher._tag === "RegExp"
+      ? new RegExp(matcher.source, matcher.flags).test(value)
+      : compare(value, matcher.value, true, matcher.ignoreCase)
+
+  /** An element's text for `toHaveText` and `toContainText`: its rendered text when asked, collapsed alike. */
+  const expectedTextOf = (element: Element, useInnerText: boolean): string =>
+    useInnerText && element instanceof HTMLElement ? collapse(dom.innerText(element)) : textOf(element)
 
   /** Checks an expectation once: whether it holds, and what was seen. */
   const evaluate = (steps: ReadonlyArray<Step>, expectation: Expectation): { passed: boolean; observed: unknown } => {
@@ -3651,7 +3844,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Count":
         return { passed: found.length === expectation.count, observed: found.length }
       case "Text": {
-        const texts = found.map(textOf)
+        const texts = found.map((element) => expectedTextOf(element, expectation.useInnerText))
         if (expectation.list) {
           return {
             passed: texts.length === expectation.expected.length &&
@@ -3661,6 +3854,22 @@ export function engine(render: (root: SnapNode) => string) {
         }
         if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
         return { passed: expected(expectation.expected[0]!, texts[0]!), observed: texts[0] }
+      }
+      case "ContainsText": {
+        const texts = found.map((element) => expectedTextOf(element, expectation.useInnerText))
+        if (expectation.list) {
+          if (expectation.expected.length === 0) return { passed: texts.length === 0, observed: texts }
+          // Each entry is contained in a later match than the entry before it
+          let next = 0
+          for (const entry of expectation.expected) {
+            while (next < texts.length && !contains(entry, texts[next]!)) next++
+            if (next === texts.length) return { passed: false, observed: texts }
+            next++
+          }
+          return { passed: true, observed: texts }
+        }
+        if (found.length !== 1) return { passed: false, observed: { matches: found.length } }
+        return { passed: contains(expectation.expected[0]!, texts[0]!), observed: texts[0] }
       }
       case "Class": {
         const texts = found.map((element) => dom.classList(element).toString())
@@ -3721,16 +3930,6 @@ export function engine(render: (root: SnapNode) => string) {
         const matches = accessibleTextMatches(text, expectation.expected, expectation.ignoreCase)
         return { passed: expectation.not ? !matches : matches, observed: text }
       }
-      case "ContainsText": {
-        const text = textOf(element)
-        const matcher = expectation.expected
-        return {
-          passed: matcher._tag === "RegExp"
-            ? new RegExp(matcher.source, matcher.flags).test(text)
-            : text.includes(collapse(matcher.value)),
-          observed: text
-        }
-      }
       case "Values": {
         const control = textSelectionTarget(element)
         if (!(control instanceof HTMLSelectElement) || !control.multiple) {
@@ -3771,14 +3970,7 @@ export function engine(render: (root: SnapNode) => string) {
       case "Attribute": {
         const value = dom.getAttribute(element, expectation.name)
         const matcher = expectation.expected
-        return {
-          passed: value !== null &&
-            (matcher === null ||
-              (matcher._tag === "RegExp"
-                ? new RegExp(matcher.source, matcher.flags).test(value)
-                : value === matcher.value)),
-          observed: value
-        }
+        return { passed: value !== null && (matcher === null || rawMatches(matcher, value)), observed: value }
       }
       default:
         return { passed: false, observed: null }
@@ -3945,6 +4137,93 @@ export function engine(render: (root: SnapNode) => string) {
       onFrame(tick)
       const timer = setTimer(() => finish(true), request.cap)
     })
+  }
+
+  /**
+   * Watches armed for `change`: each one stops at its first change signal, which it keeps until a wait reads it, and
+   * is forgotten a minute after it is armed, so one no wait reads holds nothing for long.
+   */
+  interface Watch {
+    changed: boolean
+    /** Settles the wait on this watch: with whether it changed, and whether to arm the next. */
+    waiter: ((changed: boolean, arm: boolean) => void) | undefined
+    stop: () => void
+  }
+  const watches = new Map<string, Watch>()
+  let watchSequence = 0
+  const watchEpoch = Math.random().toString(36).slice(2)
+  const watchLifetime = 60_000
+  const armWatch = (): string => {
+    const token = `${watchEpoch}:${++watchSequence}`
+    const EVENTS = ["input", "change", "focusin", "focusout"]
+    const unlisten = () => {
+      observer.disconnect()
+      for (const type of EVENTS) removeEventListener(type, noticed, true)
+      cancelFrame(frame)
+    }
+    // The signal is kept until a wait reads it or the watch is forgotten
+    const noticed = () => {
+      unlisten()
+      watch.changed = true
+      watch.waiter?.(true, true)
+    }
+    const observer = new MutationObserver(noticed)
+    observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true })
+    for (const type of EVENTS) addEventListener(type, noticed, true)
+    const frame = onFrame(noticed)
+    // A watch forgotten counts as changed: what happened since is unknown
+    const expiry = setTimer(() => {
+      unlisten()
+      watches.delete(token)
+      watch.waiter?.(true, true)
+    }, watchLifetime)
+    const watch: Watch = {
+      changed: false,
+      waiter: undefined,
+      stop: () => {
+        unlisten()
+        clearTimer(expiry)
+      }
+    }
+    watches.set(token, watch)
+    return token
+  }
+  /** The first change since a token was armed, at once if it came already, or the cap: whether it changed. */
+  const change = (request: Extract<Request, { op: "change" }>): Promise<Response> =>
+    new Promise((resume) => {
+      const answer = (changed: boolean, arm = true) =>
+        resume({ _tag: "Watching", changed, token: arm ? armWatch() : "" })
+      if (request.token === null) return answer(false)
+      const watch = watches.get(request.token)
+      // Armed in another document, or forgotten: what changed since is unknown, so it counts as a change
+      if (watch === undefined) return answer(true)
+      if (watch.changed || request.cap <= 0) {
+        watches.delete(request.token)
+        watch.stop()
+        return answer(watch.changed)
+      }
+      let settled = false
+      const timer = setTimer(() => finish(false, true), request.cap)
+      const finish = (changed: boolean, arm: boolean) => {
+        if (settled) return
+        settled = true
+        watches.delete(request.token!)
+        clearTimer(timer)
+        watch.stop()
+        answer(changed, arm)
+      }
+      watch.waiter = finish
+    })
+
+  /** Releases a watch, and ends a wait on it without arming another: its owner has gone. */
+  const unwatch = (token: string): Response => {
+    const watch = watches.get(token)
+    if (watch !== undefined) {
+      watches.delete(token)
+      watch.stop()
+      watch.waiter?.(false, false)
+    }
+    return { _tag: "Watching", changed: false, token: "" }
   }
 
   // Snapshots
@@ -4177,7 +4456,7 @@ export function engine(render: (root: SnapNode) => string) {
         if (textShown) pending += dom.textContent(node) ?? ""
         return
       }
-      if (!(node instanceof Element) || SKIPPED.has(dom.localName(node)) || node === overlayHost) return
+      if (!(node instanceof Element) || SKIPPED.has(dom.localName(node)) || drawn(node)) return
       if (dom.getAttribute(node, "aria-hidden") === "true") return
       if (inert(node)) {
         // An inert ancestor of the topmost modal dialog adds nothing of its own, but the dialog escapes it
@@ -4426,38 +4705,71 @@ export function engine(render: (root: SnapNode) => string) {
     const doctype = type === null ? "" : new XMLSerializer().serializeToString(type)
     const root = dom.documentElement(document)
     if (root === null) return { _tag: "Read", value: doctype }
-    if (overlayHost === null || !dom.contains(root, overlayHost)) {
-      return { _tag: "Read", value: doctype + dom.outerHTML(root) }
-    }
-    // The overlays' host leaves the page's HTML by node, wherever the page moved it: the document element is
-    // copied into a document with no browsing context, where nothing upgrades, loads or observes, and the host's
+    const hosts = [overlayHost, maskHost].filter((host): host is Element => host !== null && dom.contains(root, host))
+    if (hosts.length === 0) return { _tag: "Read", value: doctype + dom.outerHTML(root) }
+    // The library's hosts leave the page's HTML by node, wherever the page moved them: the document element is
+    // copied into a document with no browsing context, where nothing upgrades, loads or observes, and each host's
     // copy, found by its path of child indices, is removed before serializing. The page's tree is never touched
-    const path: Array<number> = []
-    for (let node: Node = overlayHost; node !== root;) {
-      const parent = dom.parentNode(node)!
-      path.unshift(Array.prototype.indexOf.call(dom.childNodes(parent), node))
-      node = parent
-    }
+    const paths = hosts.map((host) => {
+      const path: Array<number> = []
+      for (let node: Node = host; node !== root;) {
+        const parent = dom.parentNode(node)!
+        path.unshift(Array.prototype.indexOf.call(dom.childNodes(parent), node))
+        node = parent
+      }
+      return path
+    })
     const inert = document.implementation.createHTMLDocument("")
     const copy = inert.importNode(root, true)
-    let twin: Node = copy
-    for (const index of path) twin = twin.childNodes[index]!
-    twin.parentNode!.removeChild(twin)
+    // Every copy is found before any is removed, so one's removal doesn't move another's path
+    const twins = paths.map((path) => {
+      let twin: Node = copy
+      for (const index of path) twin = twin.childNodes[index]!
+      return twin
+    })
+    for (const twin of twins) twin.parentNode?.removeChild(twin)
     return { _tag: "Read", value: doctype + (copy as Element).outerHTML }
   }
 
+  // Every match's count and how many are visible, and the first ten described
   const strict = (found: ReadonlyArray<Element>): Response => ({
     _tag: "Strict",
     count: found.length,
+    visible: found.filter((element) => visible(element)).length,
     candidates: found.slice(0, 10).map((element) => ({ description: describe(element), visible: visible(element) }))
   })
+
+  // Each iframe's identity with the frame it holds: one id per iframe and window, shared by every lookup and kept
+  // as long as the iframe holds that window, which a navigation keeps and a reinsertion replaces. A new window, or
+  // an engine installed again, gives a new id, so an id names one iframe holding one frame.
+  const iframeWindow = getter(HTMLIFrameElement.prototype, "contentWindow")
+  const frameWindow = getter(HTMLFrameElement.prototype, "contentWindow")
+  const windowOf = (element: Element): WindowProxy | null =>
+    element instanceof HTMLIFrameElement
+      ? iframeWindow(element)
+      : element instanceof HTMLFrameElement
+      ? frameWindow(element)
+      : null
+  const identities = new WeakMap<Element, { readonly window: WindowProxy; readonly id: string }>()
+  const identityEpoch = Math.random().toString(36).slice(2)
+  let identityCount = 0
+  /** The iframe's identity with the window it holds now, or `null` when it holds none. */
+  const frameIdentity = (element: Element): string | null => {
+    const held = windowOf(element)
+    if (held === null) return null
+    const known = identities.get(element)
+    if (known !== undefined && known.window === held) return known.id
+    const id = `${identityEpoch}:${++identityCount}`
+    identities.set(element, { window: held, id })
+    return id
+  }
 
   /**
    * The one match itself, for an evaluation that returns it by value with its node binding: what
    * `setInputFiles`, `Locator.evaluate` and a frame's iframe need. Otherwise a `Response` as JSON text: no match,
    * several, an invalid selector, or, for an iframe, an element that isn't one.
    */
-  const element = (text: string): Element | Array<Element> | string => {
+  const element = (text: string): Element | Array<Element> | readonly [Element, string | null] | string => {
     const request = JSON.parse(text) as {
       readonly steps: ReadonlyArray<Step>
       /** The complete query, before frame routing splits it. */
@@ -4466,6 +4778,8 @@ export function engine(render: (root: SnapNode) => string) {
       readonly frame?: boolean
       /** For an iframe on an action's way: scrolled into view, so its frame renders (QUIRKS.md, Q110). */
       readonly scroll?: boolean
+      /** For an iframe: answer it with its identity, `[element, identity]`, which later requests check. */
+      readonly identify?: boolean
     }
     clearTreeCaches()
     let found: Array<Element>
@@ -4501,7 +4815,7 @@ export function engine(render: (root: SnapNode) => string) {
     if (request.scroll === true && !inViewport(one)) {
       dom.scrollIntoView(one, { block: "center", inline: "center", behavior: "instant" })
     }
-    return one
+    return request.identify === true ? [one, frameIdentity(one)] : one
   }
 
   /** An iframe's content box origin, scrolled into view when asked, and what the pointer would hit at a point. */
@@ -4549,7 +4863,15 @@ export function engine(render: (root: SnapNode) => string) {
         Math.min(bounds.bottom, rect.bottom - parseFloat(style.borderBottomWidth) - parseFloat(style.paddingBottom)) -
         origin.y
     }
-    return { _tag: "Frame", origin, viewport, scrolled, covered, scroll: { x: scrollX, y: scrollY } }
+    return {
+      _tag: "Frame",
+      origin,
+      viewport,
+      scrolled,
+      covered,
+      scroll: { x: scrollX, y: scrollY },
+      ...(request.identity === undefined ? {} : { held: frameIdentity(iframe) === request.identity })
+    }
   }
 
   // Invalid events do not bubble or cross shadow boundaries. Listen on each existing open root,
@@ -4611,6 +4933,8 @@ export function engine(render: (root: SnapNode) => string) {
           )
         case "count":
           return JSON.stringify({ _tag: "Count", count: resolve(request.steps).length } satisfies Response)
+        case "candidates":
+          return JSON.stringify(strict(resolve(request.steps)))
         case "visible": {
           const found = resolve(request.steps)
           if (found.length > 1) return JSON.stringify(strict(found))
@@ -4625,7 +4949,7 @@ export function engine(render: (root: SnapNode) => string) {
         case "act":
           return JSON.stringify(await act(request))
         case "fillGuard":
-          return JSON.stringify(armFill(request.steps, request.ancestor) satisfies Response)
+          return JSON.stringify(armFill(request.steps, request.ancestor, request.identity) satisfies Response)
         case "fillDisarm":
           return JSON.stringify(fillDisarm() satisfies Response)
         case "insert":
@@ -4639,6 +4963,10 @@ export function engine(render: (root: SnapNode) => string) {
           return JSON.stringify({ _tag: "Expected", passed: false, observed: null, changed: false } satisfies Response)
         case "expect":
           return JSON.stringify(await expect(request))
+        case "change":
+          return JSON.stringify(await change(request))
+        case "unwatch":
+          return JSON.stringify(unwatch(request.token))
         case "title":
           return JSON.stringify({ _tag: "Title", title: dom.title(document) } satisfies Response)
         case "frame":
@@ -4653,6 +4981,10 @@ export function engine(render: (root: SnapNode) => string) {
           return JSON.stringify(html())
         case "overlay":
           return JSON.stringify((drawOverlays ??= makeOverlays())(request))
+        case "mask":
+          return JSON.stringify(mask(request))
+        case "unmask":
+          return JSON.stringify(unmask(request.token))
         case "role":
           return JSON.stringify(
             {

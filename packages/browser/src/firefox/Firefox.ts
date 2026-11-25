@@ -15,12 +15,14 @@ import type * as Layer from "effect/Layer"
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Socket from "effect/socket/Socket"
 import type * as Browser from "../Browser.ts"
+import type * as Deadline from "../Deadline.ts"
 import * as BidiAdapter from "../internal/bidiAdapter.ts"
 import * as BrowserImpl from "../internal/browser.ts"
 import * as Connect from "../internal/connect.ts"
 import * as FirefoxLauncher from "../internal/firefoxLauncher.ts"
 import * as LaunchOptions from "../internal/launchOptions.ts"
 import type * as Url from "../Url.ts"
+import type * as UserContext from "../UserContext.ts"
 
 /**
  * Launches the Firefox executable at `executablePath` and provides it as `Browser`.
@@ -84,16 +86,20 @@ export const layer = (
   options: Browser.LaunchOptions
 ): Layer.Layer<
   Browser.Browser,
-  Browser.BrowserError,
+  Browser.BrowserError | UserContext.UserContextError | Deadline.Timeout,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Socket.WebSocketConstructor
 > =>
-  BrowserImpl.layer((sink) =>
+  BrowserImpl.layerLaunched("Firefox", LaunchOptions.launchedDefaultContext(options), (sink) =>
     Effect.flatMap(
       FirefoxLauncher.launch(LaunchOptions.settings(options)),
       ({ launched, transport }) =>
-        BidiAdapter.connect(transport, { sink, ownership: "launched", exited: launched.handle.exitCode })
-    )
-  )
+        BidiAdapter.connect(transport, {
+          sink,
+          ownership: "launched",
+          exited: launched.handle.exitCode,
+          acceptInsecureCerts: options.defaultContext?.acceptInsecureCerts
+        })
+    ))
 
 /**
  * Launches Firefox as `layer` does, with options read from configuration, such as the executable path from each
@@ -127,7 +133,7 @@ export const layerConfig = (
   options: Config.Wrap<Browser.LaunchOptions>
 ): Layer.Layer<
   Browser.Browser,
-  Browser.BrowserError | Config.ConfigError,
+  Browser.BrowserError | UserContext.UserContextError | Deadline.Timeout | Config.ConfigError,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Socket.WebSocketConstructor
 > => LaunchOptions.fromConfig(options, layer)
 

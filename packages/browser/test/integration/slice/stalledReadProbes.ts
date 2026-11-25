@@ -17,7 +17,7 @@ export const stalledReadProbes = <E>(name: string, backend: Layer.Layer<Browser.
         const served = yield* site
         const context = yield* Browser.newContext()
         const page = yield* context.newPage
-        yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent("<p>One</p>")}`)
+        yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent("<p>One</p>")}`, { waitUntil: "load" })
         return { context, page }
       })
 

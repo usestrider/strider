@@ -1,6 +1,6 @@
 /**
- * Captures on BiDi: screenshots, PDFs, and a video, which Firefox writes as a WebM file where the page's context
- * downloads to.
+ * Captures on BiDi: screenshots, PDFs, and a video, which Firefox writes as a WebM file in the directory it is
+ * given, or else where the page's context downloads to.
  */
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -88,26 +88,49 @@ export const pdf = Effect.fnUntraced(function*(state: State, id: L1Target.Naviga
   return yield* Kit.decodeBase64(data, "browsingContext.print")
 })
 
-/** A WebM file Firefox writes where the context downloads to, which a launched browser shares with the program. */
-export const video = Effect.fnUntraced(function*(state: State, id: L1Target.NavigableId) {
+/**
+ * A WebM file Firefox writes in the given directory or else where the context downloads to, either shared with the
+ * program by a launched browser. Firefox fits the page inside the size with its shape kept and no padding, and
+ * takes the frame rate as a ceiling; neither is emulated.
+ */
+export const video = Effect.fnUntraced(function*(
+  state: State,
+  id: L1Target.NavigableId,
+  options: Adapter.VideoOptions
+) {
   const navigable = yield* navigableById(state, id)
   if (state.options.ownership !== "launched") {
     return yield* Effect.fail(
       Kit.unsupported("capability.video", "Firefox writes the file on its own host, out of the program's reach")
     )
   }
-  const behavior = state.registry.downloads(navigable.context.id)
-  if (Option.isNone(behavior) || behavior.value._tag === "Deny") {
-    return yield* Effect.fail(Kit.unsupported(
-      "capability.video",
-      Option.isNone(behavior)
-        ? "The page's context declares no downloads directory, where the file would go"
-        : "The page's context denies downloads, and the file would go where they do"
-    ))
+  if (Option.isSome(options.fps) && !Number.isInteger(options.fps.value)) {
+    return yield* Effect.fail(Kit.unsupported("capability.video", "Firefox takes a whole frame rate"))
+  }
+  let directory: string
+  if (Option.isSome(options.directory)) {
+    directory = options.directory.value
+  } else {
+    const behavior = state.registry.downloads(navigable.context.id)
+    if (Option.isNone(behavior) || behavior.value._tag === "Deny") {
+      return yield* Effect.fail(Kit.unsupported(
+        "capability.video",
+        Option.isNone(behavior)
+          ? "The page's context declares no downloads directory, where the file would go"
+          : "The page's context denies downloads, and the file would go where they do"
+      ))
+    }
+    directory = behavior.value.directory
   }
   const started = yield* Kit.protocol(state.send(BrowsingContext.startScreencast({
     context: navigable.bidi,
-    destinationFolder: behavior.value.directory
+    destinationFolder: directory,
+    // Without a size, an 800 by 800 box: Firefox fits the viewport inside it, scaling down and never up, which is the
+    // default without a measurement a navigation could interrupt
+    video: {
+      ...Option.getOrElse(options.size, () => ({ width: 800, height: 800 })),
+      ...(Option.isSome(options.fps) ? { frameRate: options.fps.value } : {})
+    }
   })))
   const written = Deferred.makeUnsafe<string, Adapter.AdapterError>()
   yield* Effect.addFinalizer(() =>

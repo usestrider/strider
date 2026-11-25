@@ -785,6 +785,274 @@ export const conformance = (backend: Backend) =>
             yield* clicked.pipe(Effect.retry({ times: 30, schedule: Schedule.spaced("100 millis") }))
           }), timeout)
 
+        // The pointer crossing a cross-site frame's edge, either way or straight into another, updates both sides: the
+        // document it leaves sees it leave, the one it enters sees it enter, and the parent's hover follows it to the
+        // iframe element
+        it.effect("moves the hover across cross-site frame edges in both documents", () =>
+          Effect.gen(function*() {
+            const world = yield* setup(backend)
+            const { page } = yield* newPage(world)
+            const fixture = (origin: string, html: string) =>
+              `${origin}/fixture?html=${encodeURIComponent(html)}`
+            const child = (name: string) =>
+              `<!doctype html><body style="margin:0" data-name="${name}"><button style="position:absolute;left:0;top:0;width:100%;height:100%" onmouseenter="parent.postMessage('${name}:enter', '*')" onmouseleave="parent.postMessage('${name}:leave', '*')">${name}</button><script>parent.postMessage('${name}:loaded', '*')</script></body>`
+            const iframe = (id: string, left: number, name: string) =>
+              `<iframe id="${id}" src="${
+                fixture(world.site.crossSite, child(name))
+              }" style="position:absolute;left:${left}px;top:0;width:100px;height:60px;border:0"></iframe>`
+            yield* goto(
+              world,
+              page,
+              fixture(
+                world.site.origin,
+                `<!doctype html><body style="margin:0"><script>window.got = []; addEventListener('message', (e) => got.push(e.data)); for (const type of ['mouseover', 'mouseout', 'mouseenter', 'mouseleave']) document.addEventListener(type, (e) => { if (e.target.id) got.push(e.target.id + ':' + type) }, true)</script><div id="parent" style="position:absolute;left:0;top:0;width:80px;height:60px"></div>${
+                  iframe("a", 100, "A")
+                }${iframe("b", 220, "B")}</body>`
+              )
+            )
+            const frameOf = Effect.fnUntraced(function*(name: string) {
+              const marker = encodeURIComponent(`data-name="${name}"`)
+              const committed = yield* world.facts.when("DocumentCommitted", (fact) =>
+                fact.navigable !== page && fact.url.includes(marker))
+              return committed.navigable
+            })
+            const a = yield* frameOf("A")
+            const b = yield* frameOf("B")
+            yield* evaluate(
+              world,
+              page,
+              "() => new Promise((resolve) => { const done = () => got.includes('A:loaded') && got.includes('B:loaded') && resolve(got.splice(0)); done(); addEventListener('message', done) })"
+            )
+            const none = { alt: false, control: false, meta: false, shift: false }
+            const move = (x: number, y: number) =>
+              ({
+                _tag: "Mouse",
+                type: "move",
+                x,
+                y,
+                button: "none",
+                clickCount: 0,
+                modifiers: none,
+                buttons: 0
+              }) as const
+            const into = (frame: Target.NavigableId, left: number) => {
+              const origin = { x: left, y: 0 }
+              return { frame, origin, path: [{ frame, origin }] }
+            }
+            const state = Effect.gen(function*() {
+              return {
+                got: (yield* evaluate(world, page, "() => got.splice(0)")) as ReadonlyArray<string>,
+                hover: yield* evaluate(
+                  world,
+                  page,
+                  "() => [...document.querySelectorAll(':hover')].map((e) => e.id).filter(Boolean)"
+                ),
+                a: yield* evaluate(world, a, "() => document.querySelector('button').matches(':hover')"),
+                b: yield* evaluate(world, b, "() => document.querySelector('button').matches(':hover')")
+              }
+            })
+            const entry = (yield* SubscriptionRef.get(world.adapter.capabilities)).entries.find((each) =>
+              each.name === "input.frameBoundaries"
+            )
+            assert.isDefined(entry)
+            assert.notStrictEqual(entry.status, "unsupported")
+            // Where the backend can't tell the page's documents of a crossing, the frames still see it, and the
+            // parent sees nothing: its hover stays on its element, as no false leave is sent to it
+            const full = entry.status === "supported"
+            const crossed = (
+              name: string,
+              input: Effect.Effect<void, unknown>,
+              frames: ReadonlyArray<string>,
+              parent: ReadonlyArray<string>,
+              hover: ReadonlyArray<string>,
+              ab: readonly [boolean, boolean]
+            ) => ({
+              name,
+              input,
+              events: full ? [...parent, ...frames] : frames,
+              hover: full ? hover : ["parent"],
+              a: ab[0],
+              b: ab[1]
+            })
+            // Each crossing's events, and the hover it leaves in the parent and in each frame, for input that names
+            // its frame, as a locator's does, and then for input that names none, as the page's mouse sends it
+            const toA = ["parent:mouseout", "parent:mouseleave", "a:mouseover", "a:mouseenter"]
+            const toB = ["a:mouseout", "a:mouseleave", "b:mouseover", "b:mouseenter"]
+            const back = ["b:mouseout", "b:mouseleave", "parent:mouseover", "parent:mouseenter"]
+            const crossings = [
+              {
+                name: "to the parent's element",
+                input: world.adapter.dispatchInput(page, [move(40, 30)]),
+                events: ["parent:mouseover", "parent:mouseenter"],
+                hover: ["parent"],
+                a: false,
+                b: false
+              },
+              ...([true, false] as const).flatMap((named) => {
+                const how = named ? "naming its frame" : "naming no frame"
+                return [
+                  crossed(
+                    `from the parent's element into frame A, ${how}`,
+                    world.adapter.dispatchInput(page, [move(150, 30)], named ? into(a, 100) : undefined),
+                    ["A:enter"],
+                    toA,
+                    ["a"],
+                    [true, false]
+                  ),
+                  crossed(
+                    `from frame A into frame B, ${how}`,
+                    world.adapter.dispatchInput(page, [move(270, 30)], named ? into(b, 220) : undefined),
+                    ["A:leave", "B:enter"],
+                    toB,
+                    ["b"],
+                    [false, true]
+                  ),
+                  crossed(
+                    `from frame B back to the parent's element, ${how}`,
+                    world.adapter.dispatchInput(page, [move(40, 30)]),
+                    ["B:leave"],
+                    back,
+                    ["parent"],
+                    [false, false]
+                  )
+                ]
+              })
+            ]
+            const failures: Array<string> = []
+            for (const crossing of crossings) {
+              yield* crossing.input
+              const seen: Array<string> = []
+              // Exactly the crossing's events, so a backend that starts sending the ones it couldn't fails here
+              const settled = (current: Effect.Success<typeof state>) =>
+                JSON.stringify([...seen].sort()) === JSON.stringify([...crossing.events].sort()) &&
+                JSON.stringify(current.hover) === JSON.stringify(crossing.hover) && current.a === crossing.a &&
+                current.b === crossing.b
+              let last = yield* state
+              seen.push(...last.got)
+              for (let attempt = 0; attempt < 20 && !settled(last); attempt++) {
+                yield* Effect.sleep("100 millis")
+                last = yield* state
+                seen.push(...last.got)
+              }
+              if (!settled(last)) {
+                failures.push(
+                  `${crossing.name}: events ${JSON.stringify(seen)}, parent :hover ${
+                    JSON.stringify(last.hover)
+                  }, A :hover ${last.a}, B :hover ${last.b}`
+                )
+              }
+            }
+            // Reuse A as the middle document: the nested child is cross-site relative to A, even though it
+            // shares the top page's origin. Named input supplies every ancestor's viewport origin.
+            const nestedUrl = fixture(world.site.origin, child("C").replaceAll("parent.postMessage", "top.postMessage"))
+            yield* evaluate(
+              world,
+              a,
+              `() => new Promise((resolve) => {
+              for (const type of ['mouseover', 'mouseout', 'mouseenter', 'mouseleave']) {
+                document.addEventListener(type, (e) => {
+                  if (e.target.id === 'c') top.postMessage('c:' + type, '*')
+                }, true)
+              }
+              const frame = document.createElement('iframe'); frame.id = 'c';
+              frame.style = 'position:absolute;left:50px;top:0;width:50px;height:60px;border:0';
+              frame.onload = () => resolve(true); frame.src = ${JSON.stringify(nestedUrl)};
+              document.body.append(frame)
+            })`
+            )
+            const c = yield* frameOf("C")
+            yield* evaluate(
+              world,
+              page,
+              "() => new Promise((resolve) => { const done = () => got.includes('C:loaded') && resolve(got.splice(0)); done(); addEventListener('message', done) })"
+            )
+            const nestedOrigin = { x: 150, y: 0 }
+            const nested = {
+              frame: c,
+              origin: nestedOrigin,
+              path: [{ frame: a, origin: { x: 100, y: 0 } }, { frame: c, origin: nestedOrigin }]
+            }
+            for (const named of [true, false]) {
+              const how = named ? "naming its frame" : "naming no frame"
+              for (
+                const step of [
+                  {
+                    name: "enter middle",
+                    x: 125,
+                    frame: into(a, 100),
+                    events: full ? [...toA, "A:enter"] : ["A:enter"],
+                    a: true,
+                    c: false,
+                    middle: false,
+                    hover: full ? ["a"] : ["parent"]
+                  },
+                  {
+                    name: "enter nested",
+                    x: 175,
+                    frame: nested,
+                    events: full ? ["A:leave", "c:mouseover", "c:mouseenter", "C:enter"] : ["C:enter"],
+                    a: !full,
+                    c: true,
+                    middle: full,
+                    hover: full ? ["a"] : ["parent"]
+                  },
+                  {
+                    name: "leave nested and middle",
+                    x: 40,
+                    frame: undefined,
+                    events: full
+                      ? [
+                        "C:leave",
+                        "c:mouseout",
+                        "c:mouseleave",
+                        "a:mouseout",
+                        "a:mouseleave",
+                        "parent:mouseover",
+                        "parent:mouseenter"
+                      ]
+                      : ["C:leave", "A:leave"],
+                    a: false,
+                    c: false,
+                    middle: false,
+                    hover: ["parent"]
+                  }
+                ]
+              ) {
+                yield* world.adapter.dispatchInput(page, [move(step.x, 30)], named ? step.frame : undefined)
+                const seen: Array<string> = []
+                const snapshot = Effect.gen(function*() {
+                  const current = yield* state
+                  seen.push(...current.got)
+                  return {
+                    events: [...seen].sort(),
+                    hover: current.hover,
+                    a: current.a,
+                    c: yield* evaluate(world, c, "() => document.querySelector('button').matches(':hover')"),
+                    middle: yield* evaluate(world, a, "() => document.querySelector('#c').matches(':hover')")
+                  }
+                })
+                const expected = {
+                  events: [...step.events].sort(),
+                  hover: step.hover,
+                  a: step.a,
+                  c: step.c,
+                  middle: step.middle
+                }
+                let actual = yield* snapshot
+                for (let attempt = 0; attempt < 20 && JSON.stringify(actual) !== JSON.stringify(expected); attempt++) {
+                  yield* Effect.sleep("100 millis")
+                  actual = yield* snapshot
+                }
+                if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+                  failures.push(
+                    `${step.name}, ${how}: expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`
+                  )
+                }
+              }
+            }
+            assert.deepStrictEqual(failures, [])
+          }), timeout)
+
         it.effect("sends input into a cross-site frame that has not drawn its first frame yet", () =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
@@ -1190,8 +1458,7 @@ export const conformance = (backend: Backend) =>
             const fulfilled = yield* evaluate(world, page, "() => fetch('/json').then((r) => r.text())").pipe(
               Effect.forkChild
             )
-            const first = yield* world.facts.when("ObligationOpened", (fact) =>
-              fact.subject._tag === "PausedRequest")
+            const first = yield* world.facts.when("ObligationOpened", (fact) => fact.subject._tag === "PausedRequest")
             assert(first.subject._tag === "PausedRequest")
             assert.strictEqual(first.subject.request.url, `${world.site.origin}/json`)
             yield* world.adapter.resolve(first.obligation, {
@@ -1204,15 +1471,19 @@ export const conformance = (backend: Backend) =>
             const failed = yield* evaluate(world, page, "() => fetch('/json').then(() => 'ok', () => 'failed')").pipe(
               Effect.forkChild
             )
-            const second = yield* world.facts.when("ObligationOpened", (fact) =>
-              fact.subject._tag === "PausedRequest" && fact.obligation !== first.obligation)
+            const second = yield* world.facts.when(
+              "ObligationOpened",
+              (fact) => fact.subject._tag === "PausedRequest" && fact.obligation !== first.obligation
+            )
             yield* world.adapter.resolve(second.obligation, { _tag: "Fail", error: "failed" })
             assert.strictEqual(yield* Fiber.join(failed), "failed")
             const continued = yield* evaluate(world, page, "() => fetch('/headers').then((r) => r.json())").pipe(
               Effect.forkChild
             )
-            const third = yield* world.facts.when("ObligationOpened", (fact) =>
-              fact.subject._tag === "PausedRequest" && fact.subject.request.url.endsWith("/headers"))
+            const third = yield* world.facts.when(
+              "ObligationOpened",
+              (fact) => fact.subject._tag === "PausedRequest" && fact.subject.request.url.endsWith("/headers")
+            )
             // Headers replace the request's own, on every backend: keep them, and add one
             assert(third.subject._tag === "PausedRequest")
             yield* world.adapter.resolve(third.obligation, {
@@ -1244,8 +1515,11 @@ export const conformance = (backend: Backend) =>
                 page,
                 "() => fetch('/echo', { method: 'POST', body: 'hello' }).then((r) => r.json()).then((j) => j.body)"
               ).pipe(Effect.forkChild)
-              const opened = yield* world.facts.when("ObligationOpened", (fact) =>
-                fact.subject._tag === "PausedRequest" && fact.subject.request.url.endsWith("/echo"))
+              const opened = yield* world.facts.when(
+                "ObligationOpened",
+                (fact) =>
+                  fact.subject._tag === "PausedRequest" && fact.subject.request.url.endsWith("/echo")
+              )
               const body = yield* world.adapter.pausedRequestBody(opened.obligation)
               assert.strictEqual(Option.getOrUndefined(Option.map(body, decode)), "hello")
               yield* world.adapter.resolve(opened.obligation, {
@@ -1264,8 +1538,10 @@ export const conformance = (backend: Backend) =>
               const fetched = yield* evaluate(world, page, "() => fetch('/json').then((r) => r.text())").pipe(
                 Effect.forkChild
               )
-              const opened = yield* world.facts.when("ObligationOpened", (fact) =>
-                fact.subject._tag === "PausedRequest" && fact.subject.phase === "response")
+              const opened = yield* world.facts.when(
+                "ObligationOpened",
+                (fact) => fact.subject._tag === "PausedRequest" && fact.subject.phase === "response"
+              )
               const body = yield* Effect.exit(world.adapter.pausedResponseBody(opened.obligation))
               if (capabilities.has("interception.responseBody")) {
                 assert(Exit.isSuccess(body), String(body))
@@ -1294,8 +1570,10 @@ export const conformance = (backend: Backend) =>
                 .pipe(
                   Effect.forkChild
                 )
-              const opened = yield* world.facts.when("ObligationOpened", (fact) =>
-                fact.subject._tag === "PausedRequest" && fact.subject.phase === "auth")
+              const opened = yield* world.facts.when(
+                "ObligationOpened",
+                (fact) => fact.subject._tag === "PausedRequest" && fact.subject.phase === "auth"
+              )
               assert(opened.subject._tag === "PausedRequest")
               assert.strictEqual(Option.getOrThrow(opened.subject.challenge).realm, "strider")
               yield* world.adapter.resolve(opened.obligation, {
@@ -1304,8 +1582,7 @@ export const conformance = (backend: Backend) =>
                 password: "secret"
               })
               const navigation = yield* Fiber.join(navigating)
-              const ended = yield* world.facts.when("NavigationEnded", (fact) =>
-                fact.navigation === navigation)
+              const ended = yield* world.facts.when("NavigationEnded", (fact) => fact.navigation === navigation)
               assert.strictEqual(ended.outcome._tag, "Committed")
               assert.strictEqual(yield* evaluate(world, page, "() => document.body.innerText"), "signed in")
             }))
@@ -1328,8 +1605,11 @@ export const conformance = (backend: Backend) =>
                 .pipe(
                   Effect.forkChild
                 )
-              const opened = yield* world.facts.when("ObligationOpened", (fact) =>
-                fact.subject._tag === "PausedRequest" && fact.subject.request.url.endsWith("/blocked"))
+              const opened = yield* world.facts.when(
+                "ObligationOpened",
+                (fact) =>
+                  fact.subject._tag === "PausedRequest" && fact.subject.request.url.endsWith("/blocked")
+              )
               const reason = capabilities.has("interception.abortReason") ? "aborted" : "failed"
               yield* world.adapter.resolve(opened.obligation, { _tag: "Fail", error: reason })
               const navigation = yield* Fiber.join(navigating)
@@ -1355,9 +1635,7 @@ export const conformance = (backend: Backend) =>
               const declared = yield* Effect.exit(Effect.scoped(
                 world.adapter.declare({ _tag: "UserContext", context }, { _tag: "Override", override })
               ))
-              const entry = capabilities.entries.find((each) =>
-                each.name === capability
-              )
+              const entry = capabilities.entries.find((each) => each.name === capability)
               assert.isDefined(entry, capability)
               if (entry.status === "unsupported") {
                 assert(Exit.isFailure(declared), capability)
@@ -1391,8 +1669,11 @@ export const conformance = (backend: Backend) =>
             yield* script("window.order.push('after broken')", [broken])
             yield* goto(world, page, `${world.site.origin}/hello`)
             assert.deepStrictEqual(yield* evaluate(world, page, "() => window.order"), ["helper", "after helper"])
-            const thrown = yield* world.facts.when("UncaughtException", (fact) =>
-              fact.exception.message === "init threw")
+            const thrown = yield* world.facts.when(
+              "UncaughtException",
+              (fact) =>
+                fact.exception.message === "init threw"
+            )
             assert.strictEqual(thrown.exception.name, "Error")
           }), timeout)
 
@@ -1496,16 +1777,14 @@ export const conformance = (backend: Backend) =>
             assert.deepStrictEqual(hello.message.origin, { _tag: "Page", page })
             // 1-based, as stack traces print it: the page is one line
             assert.strictEqual(Option.getOrThrow(hello.message.location).line, 1)
-            const bad = yield* world.facts.when("ConsoleMessage", (fact) =>
-              fact.message.text === "bad")
+            const bad = yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text === "bad")
             assert.strictEqual(bad.message.level, "error")
             const thrown = yield* world.facts.when("UncaughtException")
             assert.strictEqual(thrown.exception.name, "TypeError")
             assert.strictEqual(thrown.exception.message, "thrown here")
             // A thrown value that isn't an Error reads as an Error whose message is the value
             yield* evaluate(world, page, "() => { setTimeout(() => { throw 'a string' }) }")
-            const raw = yield* world.facts.when("UncaughtException", (fact) =>
-              fact.exception.message === "a string")
+            const raw = yield* world.facts.when("UncaughtException", (fact) => fact.exception.message === "a string")
             assert.strictEqual(raw.exception.name, "Error")
             // A message logged again is its own message, at its own time, though stock WebKit reports it as a repeat
             // of the first
@@ -1514,8 +1793,7 @@ export const conformance = (backend: Backend) =>
               page,
               `() => { for (let i = 0; i < 2; i++) { console.log("again"); const end = Date.now() + 5; while (Date.now() < end); } }`
             )
-            const first = yield* world.facts.when("ConsoleMessage", (fact) =>
-              fact.message.text === "again")
+            const first = yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text === "again")
             const second = yield* world.facts.when("ConsoleMessage", (fact) =>
               fact.message.text === "again" && fact !== first)
             assert.isAbove(
@@ -1529,12 +1807,9 @@ export const conformance = (backend: Backend) =>
             const world = yield* setup(backend)
             const { page } = yield* newPage(world)
             yield* goto(world, page, `${world.site.origin}/console-previews`)
-            const texts = (yield* world.facts.when("ConsoleMessage", (fact) =>
-              fact.message.text.startsWith("worker")))
+            const texts = (yield* world.facts.when("ConsoleMessage", (fact) => fact.message.text.startsWith("worker")))
               .message.text
-            const all = world.facts.all("ConsoleMessage").map((fact) =>
-              fact.message.text
-            )
+            const all = world.facts.all("ConsoleMessage").map((fact) => fact.message.text)
             assert.deepStrictEqual(all.slice(0, 2), [
               "[1, 2, 3] {a: 1} Window",
               "{toString: Function, valueOf: Function}"
@@ -1646,9 +1921,7 @@ export const conformance = (backend: Backend) =>
                 const frames = yield* world.adapter.screencast(page)
                 yield* frames.pipe(
                   Stream.take(6),
-                  Stream.runForEach((frame) =>
-                    Effect.sync(() => seen[key]!.push([frame.width, frame.height]))
-                  ),
+                  Stream.runForEach((frame) => Effect.sync(() => seen[key]!.push([frame.width, frame.height]))),
                   Effect.timeout("3 seconds"),
                   Effect.ignore
                 )
@@ -1869,7 +2142,9 @@ export const conformance = (backend: Backend) =>
           Effect.gen(function*() {
             const world = yield* setup(backend)
             const { context, page } = yield* newPage(world)
-            const directory = (yield* Effect.promise(() => import("node:os"))).tmpdir() +
+            const directory = (yield* Effect.promise(() =>
+              import("node:os")
+            )).tmpdir() +
               `/strider-downloads-${process.pid}`
             const declared = world.adapter.declare({ _tag: "UserContext", context }, {
               _tag: "Downloads",
@@ -2016,8 +2291,7 @@ export const conformance = (backend: Backend) =>
               fact.subject._tag === "Prompt")
             assert.deepInclude(opened.subject, { kind: "beforeunload" })
             yield* world.adapter.resolve(opened.obligation, { _tag: "Accept", promptText: Option.none() })
-            const removed = yield* world.facts.when("NavigableRemoved", (fact) =>
-              fact.navigable === page)
+            const removed = yield* world.facts.when("NavigableRemoved", (fact) => fact.navigable === page)
             assert.deepStrictEqual(removed.reason, new Target.PageClosed({ by: "command" }))
           }), timeout)
 

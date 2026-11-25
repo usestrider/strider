@@ -4,6 +4,7 @@
  */
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import type * as AriaPattern from "../AriaPattern.ts"
@@ -52,6 +53,33 @@ export const matcher = (expected: string | RegExp, exact: boolean): Engine.TextM
   typeof expected === "string"
     ? { _tag: "String", value: expected, exact }
     : { _tag: "RegExp", source: expected.source, flags: expected.flags }
+
+/**
+ * A matcher whose case `ignoreCase` decides when given: a string compares without case, and a regular
+ * expression's `i` flag is set or cleared. Left out, a string matches case and a regular expression keeps its flags.
+ */
+export const casedMatcher = (
+  expected: string | RegExp,
+  exact: boolean,
+  ignoreCase: boolean | undefined
+): Engine.TextMatcher =>
+  typeof expected === "string"
+    ? { _tag: "String", value: expected, exact, ...(ignoreCase === true ? { ignoreCase } : {}) }
+    : {
+      _tag: "RegExp",
+      source: expected.source,
+      flags: ignoreCase === undefined ? expected.flags : expected.flags.replace(/i/g, "") + (ignoreCase ? "i" : "")
+    }
+
+/** What a condition adds for `ignoreCase` when it is given. */
+const caseShown = (ignoreCase: boolean | undefined) =>
+  ignoreCase === undefined ? "" : ignoreCase ? " ignoring case" : " matching case"
+
+/** The options of the text expectations. */
+export interface TextOptions {
+  readonly ignoreCase?: boolean | undefined
+  readonly useInnerText?: boolean | undefined
+}
 
 /** Export classification follows the failure's identity, including catches and rethrows outside its operation. */
 export type EvidenceKind = "URL" | "Title" | "Value" | "Other" | "SourceURL" | "SourceTitle"
@@ -138,7 +166,7 @@ const explain = (subject: InPage, id: Diagnostics.OperationId): Effect.Effect<Ex
     Operation.apart("Expect.explain", Duration.millis(explainBudget)),
     Effect.map((response): Explained => {
       if (response._tag !== "Explained" || response.matched) return none
-      const boundary = subject.steps.findLastIndex((step) => step._tag === "Frame")
+      const boundary = subject.steps.findLastIndex((step) => step._tag === "Frame" || step._tag === "AnyFrame")
       const frames = subject.steps.slice(0, boundary + 1)
       const last = subject.steps.slice(boundary + 1)
       return {
@@ -405,38 +433,53 @@ export const polling = Operation.fn("Expect.that")(
 )
 
 /** The page's URL is expected to match: checked on each change of it. */
-export const toHaveURL = (page: Page.ReadonlyPage, expected: string | RegExp) =>
-  Effect.suspend(() => Handles.page(page).entry.execution.url(page, expected))
+export const toHaveURL = (page: Page.ReadonlyPage, expected: string | RegExp, options?: URLOptions | undefined) =>
+  Effect.suspend(() => Handles.page(page).entry.execution.url(page, expected, options))
+
+/** The options of `toHaveURL`. */
+export interface URLOptions {
+  readonly ignoreCase?: boolean | undefined
+}
 
 /** The unchanged model-only URL watcher used by ordinary dispatch and suppressed callbacks. */
-export const watchURL = (page: Page.ReadonlyPage, expected: string | RegExp) =>
-  watching(
+export const watchURL = (page: Page.ReadonlyPage, expected: string | RegExp, options?: URLOptions | undefined) => {
+  const url = casedMatcher(expected, true, options?.ignoreCase)
+  return watching(
     page.url,
-    (url: string) =>
-      typeof expected === "string" ? url === expected : new RegExp(expected.source, expected.flags).test(url),
+    (actual: string) =>
+      url._tag === "RegExp"
+        ? new RegExp(url.source, url.flags).test(actual)
+        : url.ignoreCase === true
+        ? actual.toLowerCase() === url.value.toLowerCase()
+        : actual === url.value,
     "toHaveURL",
     `page ${page.id}`,
-    `to have the URL ${show(expected)}`,
+    `to have the URL ${show(expected)}${caseShown(options?.ignoreCase)}`,
     { "browser.page.id": page.id }
   )
+}
 
 /** Page-bound URL assertions on opted-in pages use the cooperative check/retry boundary. */
 export const handlerURL = (
   page: Page.ReadonlyPage,
   expected: string | RegExp,
+  options: URLOptions | undefined,
   execute: (
     request: Engine.CooperativeURLRequest,
     record: Operation.Record
   ) => Effect.Effect<Engine.Response, Execution.Failure>
 ) => {
   const { entry, runtime } = Handles.page(page)
-  const expectation: Engine.CooperativeURLRequest["expectation"] = { _tag: "URL", expected: matcher(expected, true) }
+  const expectation: Engine.CooperativeURLRequest["expectation"] = {
+    _tag: "URL",
+    expected: casedMatcher(expected, true, options?.ignoreCase)
+  }
   // Reading the URL is an observe operation, including on a formerly borrowed handle.
   return expectUsing(
     { runtime, page: entry, grant: Option.none(), steps: [], description: `page ${page.id}` },
     expectation,
     "toHaveURL",
-    `to have the URL ${show(expected)}`,
+    `to have the URL ${show(expected)}${caseShown(options?.ignoreCase)}`,
     (cap, record) => execute({ op: "expect", steps: [], expectation, cap }, record)
   )
 }
@@ -481,18 +524,32 @@ export const toBeFocused = stateOf("Focused")("toBeFocused", "to have focus")
 export const toBeEmpty = stateOf("Empty")("toBeEmpty", "to be empty")
 export const toBeEditable = stateOf("Editable")("toBeEditable", "to be editable")
 
-export const toHaveText = (
-  locator: Locator.ReadonlyLocator,
-  expected: string | RegExp | ReadonlyArray<string | RegExp>
+/** A text expectation's entries, and how its condition names them and its options. */
+const textExpectation = (
+  expected: string | RegExp | ReadonlyArray<string | RegExp>,
+  exact: boolean,
+  options: TextOptions | undefined
 ) => {
   const list = Array.isArray(expected)
   const all = (list ? expected : [expected]) as ReadonlyArray<string | RegExp>
-  return expectLocator(
-    locator,
-    { _tag: "Text", expected: all.map((each) => matcher(each, true)), list },
-    "toHaveText",
-    `to have the text ${list ? `[${all.map(show).join(", ")}]` : show(all[0]!)}`
-  )
+  const useInnerText = options?.useInnerText ?? false
+  return {
+    expected: all.map((each) => casedMatcher(each, exact, options?.ignoreCase)),
+    list,
+    useInnerText,
+    shown: `${list ? `[${all.map(show).join(", ")}]` : show(all[0]!)}${caseShown(options?.ignoreCase)}${
+      useInnerText ? " in its rendered text" : ""
+    }`
+  }
+}
+
+export const toHaveText = (
+  locator: Locator.ReadonlyLocator,
+  expected: string | RegExp | ReadonlyArray<string | RegExp>,
+  options?: TextOptions | undefined
+) => {
+  const { shown, ...text } = textExpectation(expected, true, options)
+  return expectLocator(locator, { _tag: "Text", ...text }, "toHaveText", `to have the text ${shown}`)
 }
 
 export const toHaveClass = (
@@ -509,13 +566,14 @@ export const toHaveClass = (
   )
 }
 
-export const toContainText = (locator: Locator.ReadonlyLocator, expected: string | RegExp) =>
-  expectLocator(
-    locator,
-    { _tag: "ContainsText", expected: matcher(expected, false) },
-    "toContainText",
-    `to contain the text ${show(expected)}`
-  )
+export const toContainText = (
+  locator: Locator.ReadonlyLocator,
+  expected: string | RegExp | ReadonlyArray<string | RegExp>,
+  options?: TextOptions | undefined
+) => {
+  const { shown, ...text } = textExpectation(expected, false, options)
+  return expectLocator(locator, { _tag: "ContainsText", ...text }, "toContainText", `to contain the text ${shown}`)
+}
 
 export const toHaveValue = (locator: Locator.ReadonlyLocator, expected: string | RegExp) =>
   expectLocator(
@@ -541,12 +599,23 @@ export const toHaveRole = (locator: Locator.ReadonlyLocator, expected: string) =
     `to have the role ${show(expected)}`
   )
 
-export const toHaveAttribute = (locator: Locator.ReadonlyLocator, name: string, expected?: string | RegExp) =>
+export const toHaveAttribute = (
+  locator: Locator.ReadonlyLocator,
+  name: string,
+  expected?: string | RegExp | undefined,
+  options?: { readonly ignoreCase?: boolean | undefined } | undefined
+) =>
   expectLocator(
     locator,
-    { _tag: "Attribute", name, expected: expected === undefined ? null : matcher(expected, true) },
+    {
+      _tag: "Attribute",
+      name,
+      expected: expected === undefined ? null : casedMatcher(expected, true, options?.ignoreCase)
+    },
     "toHaveAttribute",
-    `to have the attribute ${name}${expected === undefined ? "" : ` ${show(expected)}`}`
+    `to have the attribute ${name}${
+      expected === undefined ? "" : ` ${show(expected)}${caseShown(options?.ignoreCase)}`
+    }`
   )
 
 export const toHaveCount = (locator: Locator.ReadonlyLocator, count: number) =>
@@ -593,13 +662,9 @@ export const toBeInViewport = (
 }
 /** An accessible text's matcher: `ignoreCase`, when given, replaces a regular expression's `i` flag. */
 const accessibleText = (expected: string | RegExp, ignoreCase: boolean | undefined) => ({
-  expected: typeof expected === "string" ? matcher(expected, true) : {
-    _tag: "RegExp" as const,
-    source: expected.source,
-    flags: ignoreCase === undefined ? expected.flags : expected.flags.replace(/i/g, "") + (ignoreCase ? "i" : "")
-  },
+  expected: typeof expected === "string" ? matcher(expected, true) : casedMatcher(expected, true, ignoreCase),
   ignoreCase: ignoreCase === true,
-  shown: `${show(expected)}${ignoreCase === undefined ? "" : ignoreCase ? " ignoring case" : " matching case"}`
+  shown: `${show(expected)}${caseShown(ignoreCase)}`
 })
 
 /** Accessible names use the shared engine only when this expectation is requested. */
@@ -670,6 +735,231 @@ export const toHaveCSS = (
       show(expected)
     }`
   )
+
+/**
+ * A page function is expected to return `true` on a locator's one match: called in the caller's isolated world on
+ * each check, as `evaluate` calls it, and checked again after each change the page makes. No match and several are
+ * observations; a function that throws fails the expectation at once.
+ */
+export const toSatisfy = (locator: Locator.ReadonlyLocator, fn: Function, args: ReadonlyArray<unknown>) =>
+  Effect.suspend(() => {
+    if (!Locator.isLocator(locator)) return Effect.die(new Error("Expect: not a locator of this library"))
+    const impl = locator as LocatorImpl
+    const { description, owner, steps } = impl
+    const subject: InPage = { runtime: owner.runtime, page: owner.page, grant: owner.grant, steps, description }
+    const operation = "Expect.toSatisfy"
+    const condition = "to satisfy the page function"
+    return Effect.gen(function*() {
+      yield* Access.check(subject.grant)
+      const record = yield* Operation.record
+      const id = record.id
+      const started = now()
+      const history: Array<Diagnostics.ObservedValue> = []
+      const triggers = new Set<"initial" | "change" | "interval">(["initial"])
+      // Where no world of Strider's own can run the function, no check could pass
+      yield* impl.requires(operation, "isolatedWorlds", id)
+      let checks = 0
+      const failed = (handlerFailure?: Reason.LocatorHandlerFailed) =>
+        Effect.flatMap(
+          handlerFailure === undefined
+            ? explain(subject, id)
+            : Effect.succeed<Explained>({ nearest: Option.none(), suggestions: [] }),
+          (explained) =>
+            Effect.fail(
+              failure(
+                id,
+                description,
+                condition,
+                started,
+                history,
+                checks,
+                triggers,
+                explained,
+                "toSatisfy",
+                undefined,
+                handlerFailure
+              )
+            )
+        )
+      // Whether the deadline ended a step: the check that didn't finish is no observation
+      const cut = <A, E, R>(self: Effect.Effect<A, E, R>) =>
+        self.pipe(
+          Effect.map(Option.some),
+          Effect.catchIf(
+            (error: E) => Deadline.isTimeout(error) && record.left() <= 0,
+            () => Effect.succeedNone
+          )
+        )
+      const dispatch = subject.page.execution
+      // The watches this expectation armed, with the document each was armed in: released on every exit, so one
+      // left only expires when its release can't reach the page
+      const owned = new Map<string, Target.DocumentId>()
+      const release = (token: string, document: Target.DocumentId) =>
+        Runtime.releaseInDocument(subject.runtime, document, { op: "unwatch", token }, id).pipe(
+          Effect.ignore,
+          Operation.detached
+        )
+      const releaseAll = Effect.suspend(() =>
+        Effect.forEach(Array.from(owned), ([token, document]) => release(token, document), { discard: true })
+      )
+      type Waited =
+        | { readonly _tag: "Waited"; readonly changed: boolean }
+        | { readonly _tag: "Routed"; readonly response: Engine.Response }
+      /**
+       * A sequence of waits on the page's change signals: each answers at once when a signal came since the last
+       * one answered, which armed the watch it reads. The first only arms.
+       */
+      const watcher = () => {
+        let token: string | null = null
+        return (cap: number) =>
+          Runtime.sendRouted(subject.runtime, subject.page, { op: "change", steps, token, cap }, id, record.budget.at)
+            .pipe(
+              Effect.flatMap(({ response, routed }) => {
+                const previous = token === null ? undefined : owned.get(token)
+                const released = previous === undefined || previous === routed.document
+                  ? Effect.void
+                  : release(token!, previous)
+                if (token !== null) owned.delete(token)
+                if (response._tag !== "Watching") {
+                  token = null
+                  return Effect.as(released, { _tag: "Routed", response } as Waited)
+                }
+                token = response.token
+                owned.set(token, routed.document)
+                return Effect.as(released, { _tag: "Waited", changed: response.changed } as Waited)
+              }),
+              Effect.catch((failure) =>
+                failure._tag === "Deadline"
+                  ? Effect.succeed<Waited>({ _tag: "Waited", changed: false })
+                  : Effect.fail(impl.sendFailure(operation, failure, record))
+              )
+            )
+      }
+      // The page's locator handlers: a callback's typed failure fails the expectation with it, and its own
+      // Timeout or TargetGone is the expectation's, as in the other locator expectations
+      const handle = dispatch.handle.pipe(
+        Effect.map((ran) => ({ _tag: "Handled" as const, ran })),
+        Effect.catch((failure) =>
+          failure._tag === "Reason" && failure.reason._tag === "LocatorHandlerFailed"
+            ? Effect.succeed({ _tag: "HandlerFailed" as const, reason: failure.reason as Reason.LocatorHandlerFailed })
+            : Effect.fail(impl.sendFailure(operation, failure, record))
+        )
+      )
+      /** An answer for why there isn't one match: whether the expectation goes on, as for its checks. */
+      const observe = (response: Engine.Response): boolean => {
+        switch (response._tag) {
+          case "NoMatch":
+            Operation.appendObservation(history, { matches: 0 })
+            return true
+          case "Strict":
+            Operation.appendObservation(history, { matches: response.count })
+            return true
+          // What no waiting mends ends it, as it ends the other locator expectations
+          case "InvalidSelector":
+            Operation.appendObservation(history, {
+              error: `invalid selector ${JSON.stringify(response.selector)}: ${response.message}`
+            })
+            return false
+          case "StaleRef":
+            Operation.appendObservation(history, { error: `stale ref (${response.why})` })
+            return false
+          case "Final":
+            Operation.appendObservation(history, { error: `${response.final.element} on the way isn't an iframe` })
+            return false
+          default:
+            Operation.appendObservation(history, { error: `unexpected answer ${response._tag}` })
+            return true
+        }
+      }
+      const cutOff = () => {
+        if (history.length === 0) {
+          Operation.appendObservation(history, { error: "a check was still running at the deadline" })
+        }
+        return failed()
+      }
+      /**
+       * One check, with the page's handlers run on each change signal while the function is pending, as an
+       * in-page round runs them. A handler still running when the result arrives is let finish before the result
+       * is used: the result can be what the handler made, as when the function waits for an overlay's dismissal.
+       */
+      const check = Effect.fnUntraced(function*() {
+        const call = cut(impl.satisfying(operation, fn, args))
+        if (!dispatch.handlers) return { checked: yield* call, failure: undefined }
+        const signals = watcher()
+        let done = false
+        let busy = false
+        const servicing = Effect.gen(function*() {
+          yield* signals(0)
+          while (!done) {
+            if (record.left() <= 0) return yield* Effect.never
+            yield* signals(Runtime.roundCap(record.left()))
+            if (done) return undefined
+            busy = true
+            const outcome = yield* handle
+            busy = false
+            if (outcome._tag === "HandlerFailed") return outcome.reason
+          }
+          return undefined
+        })
+        // Servicing lives exactly as long as the check, the join of a running handler included: on every exit no
+        // handler starts after it, and one mid-run finishes, before the expectation releases its watches
+        return yield* Effect.uninterruptibleMask((restore) =>
+          Effect.flatMap(Effect.forkChild(servicing), (fiber) => {
+            const stop = Effect.suspend(() => {
+              done = true
+              return busy ? Effect.asVoid(Effect.exit(Fiber.join(fiber))) : Effect.asVoid(Fiber.interrupt(fiber))
+            })
+            return restore(Effect.gen(function*() {
+              const raced = yield* Effect.raceFirst(
+                Effect.map(call, (checked) => ({ _tag: "Checked" as const, checked })),
+                Effect.map(Fiber.join(fiber), (reason) => ({ _tag: "Serviced" as const, reason }))
+              )
+              done = true
+              const reason = raced._tag === "Serviced"
+                ? raced.reason
+                : busy
+                ? yield* Fiber.join(fiber)
+                : yield* Effect.as(Fiber.interrupt(fiber), undefined)
+              return {
+                checked: raced._tag === "Checked" ? raced.checked : Option.none(),
+                failure: reason
+              }
+            })).pipe(Effect.ensuring(stop))
+          })
+        )
+      })
+      const checking = watcher()
+      return yield* Effect.gen(function*() {
+        // Armed before the first check, so a change while the function runs wakes the next check at once
+        yield* checking(0)
+        while (true) {
+          checks++
+          // Registered locator handlers run before each check, as they do in the other locator expectations' rounds
+          const before = yield* handle
+          if (before._tag === "HandlerFailed") return yield* failed(before.reason)
+          // A check the expectation's deadline cut off is one that didn't finish
+          const { checked, failure: handlerFailure } = yield* check()
+          if (handlerFailure !== undefined) return yield* failed(handlerFailure)
+          if (Option.isNone(checked)) return yield* cutOff()
+          const outcome = checked.value
+          if (outcome._tag === "Value") {
+            Operation.appendObservation(history, outcome.value)
+            if (outcome.value === true) return
+          } else if (!observe(outcome.response)) return yield* failed()
+          const left = record.left()
+          if (left <= 0) return yield* failed()
+          // Answers at once when anything changed since the watch was armed, before this check
+          const waited = yield* checking(Runtime.roundCap(left))
+          if (waited._tag === "Routed") {
+            if (!observe(waited.response)) return yield* failed()
+          } else if (waited.changed) triggers.add("change")
+          if (record.left() <= 0) return yield* failed()
+        }
+      }).pipe(Effect.ensuring(releaseAll))
+    }).pipe(Operation.named(operation, {
+      attributes: { "browser.page.id": subject.page.id, "browser.subject": description }
+    }))
+  })
 
 /**
  * A JavaScript property of the one match, read in its document's main world at each check and compared here by

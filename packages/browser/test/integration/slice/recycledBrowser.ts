@@ -25,6 +25,7 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import { appendFileSync, mkdirSync } from "node:fs"
 import * as Handles from "../../../src/internal/handles.ts"
+import { sharedAcquisition } from "../failureTrace.ts"
 
 export const defaultLimit = 100
 
@@ -119,7 +120,13 @@ export const recycling = <E, R>(
       pages = 0
       launches++
       live.clear()
-      current = yield* launch(scope)
+      // The replacement serves the cases after this one, so its connection is the shared context's, as the first
+      // launch's is: a failing later case's trace keeps its traffic.
+      current = yield* Effect.acquireUseRelease(
+        Effect.sync(sharedAcquisition),
+        () => launch(scope),
+        (release) => Effect.sync(release)
+      )
       return true
     })
     const track = (acquire: Effect.Effect<any, unknown, Scope.Scope>) =>

@@ -282,7 +282,7 @@ describe("Chromium adapter, CDP only", () => {
                   assertPinned("Chromium", browser.info.version, chromium.version)
                   const context = yield* browser.defaultContext.control
                   const page = yield* context.newPage
-                  yield* page.goto(`${served.origin}/hello`)
+                  yield* page.goto(`${served.origin}/hello`, { waitUntil: "load" })
                   if (round === 0) {
                     yield* page.evaluateInMainWorld(() => localStorage.setItem("scope-shutdown", "kept"))
                   } else {
@@ -334,7 +334,7 @@ describe("Chromium adapter, CDP only", () => {
                     assert.lengthOf(yield* browser.defaultContext.pages, candidate ? 0 : 1)
                     const context = yield* browser.defaultContext.control
                     const page = yield* context.newPage
-                    yield* page.goto(`${served.origin}/hello`)
+                    yield* page.goto(`${served.origin}/hello`, { waitUntil: "load" })
                     if (round === 0) {
                       yield* page.evaluateInMainWorld(() => localStorage.setItem("windowless", "kept"))
                       // These raw-launcher controls seed with explicit graceful close; unlike Chromium.layer,
@@ -384,7 +384,7 @@ describe("Chromium adapter, CDP only", () => {
                 const opened = yield* context.newPage
                 yield* opened.close()
                 const page = yield* context.newPage
-                yield* page.goto(`${served.origin}/hello`)
+                yield* page.goto(`${served.origin}/hello`, { waitUntil: "load" })
                 assert.strictEqual(yield* page.evaluateInMainWorld(() => document.cookie), "session=1")
               }).pipe(Effect.provide(backend))
             )
@@ -1180,7 +1180,7 @@ describe("Chromium adapter, CDP only", () => {
           const order: Array<string> = []
           yield* Effect.gen(function*() {
             const page = yield* Browser.newPage()
-            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`)
+            yield* page.goto(`${served.origin}/fixture?html=${encodeURIComponent(dragFixture)}`, { waitUntil: "load" })
             yield* page.evaluateInMainWorld(() => {
               ;(window as any).keys = []
               for (const type of ["keydown", "keyup"]) addEventListener(type, () => (window as any).keys.push(type))

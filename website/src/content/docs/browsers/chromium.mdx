@@ -147,6 +147,13 @@ What changes when attached:
 
 ## Differences
 
+**The page doesn't see the pointer enter a cross-site frame.** Moving from the page into a frame of another site, by
+a [`hover()`](/docs/api/browser/Locator#Locator.hover) or [`page.mouse`](/docs/pages/actions#the-keyboard-and-the-mouse),
+fires no `mouseout` or `mouseleave` on the element the pointer left, no `mouseover` on the `iframe`, and leaves the
+page's `:hover` where it was, until the pointer comes back to the page. A hover menu holding the frame stays open.
+The frame itself sees the pointer arrive and leave. Chromium delivers its protocol's mouse input to the frame under
+the point alone, and a move that would give the page its leave would also tell it the pointer had left the window.
+
 **Request events lack `Cookie`.** `NetworkResponse.headers` include `Set-Cookie`, but `NetworkRequest.headers` don't
 include `Cookie`. Use [`NetworkRequest.headersSent`](/docs/events/network#sent-headers).
 
@@ -193,6 +200,11 @@ deadline.
 one it's `Unsupported`.
 
 **Cross-site frames render only in view,** so actions scroll each iframe into view first.
+
+**`console.timeLog` reads as `log`.** Chromium sends it as a plain message, so its
+[`method`](/docs/events/console) is `log`. `countReset`, `timeLog`, and `timeEnd` of a counter or timer that doesn't
+exist come as a warning, so they read as `warn`, and `countReset` of one that exists sends nothing. The capability
+`console.method` is `partial` here.
 
 ## The raw protocol
 

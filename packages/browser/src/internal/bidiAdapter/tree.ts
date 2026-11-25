@@ -138,6 +138,7 @@ export const removeNavigable = (
     state.navigablesById.delete(navigable.id)
     state.mouseCapture.delete(navigable.id)
     state.touchCapture.delete(navigable.id)
+    state.pointerIn.delete(navigable.id)
     if (navigable.document !== undefined) {
       for (const realm of Array.from(navigable.document.realms)) removeRealm(state, realm, reason)
       state.documents.delete(navigable.document.id)

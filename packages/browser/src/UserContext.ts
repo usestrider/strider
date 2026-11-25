@@ -133,6 +133,11 @@ export interface ObservedUserContext extends Pipeable.Pipeable, Equal.Equal, Ins
    * Gains control of the context for the scope. Even reading its storage, with `exportStorageState`, needs
    * control.
    *
+   * **Gotchas**
+   *
+   * A default context the launch configured with `defaultContext` is controlled for the layer's life, so `control`
+   * returns that context, and closing the scope that called it takes nothing away.
+   *
    * **Example** (Reading the storage of an attached browser's default context)
    *
    * ```ts import.meta.vitest

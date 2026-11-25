@@ -243,6 +243,12 @@ export interface Hop {
   readonly steps: ReadonlyArray<Engine.Step>
   /** The frame the iframe holds. */
   readonly frame: Target.NavigableId
+  /**
+   * The iframe's identity in the engine, with the frame it holds, as the hop's lookup answered it. A hop names its
+   * iframe by steps, which may find another iframe once the document changes, as when a sibling before it is
+   * removed: the engine's answers for the steps say whether the iframe they find still has this identity.
+   */
+  readonly identity: string
 }
 
 /**
@@ -255,7 +261,11 @@ export interface Routed {
   readonly hops: ReadonlyArray<Hop>
 }
 
-/** A locator's steps split at each frame boundary: each iframe's steps, outermost first, then the rest. */
+/**
+ * A locator's steps split at each frame boundary: each iframe's steps, outermost first, then the rest. A part a
+ * search across frames resolves begins with its `AnyFrame` step, except the rest, which goes without it and is
+ * `searched`.
+ */
 export const split = (steps: ReadonlyArray<Engine.Step>) => {
   const frames: Array<ReadonlyArray<Engine.Step>> = []
   let current: Array<Engine.Step> = []
@@ -267,7 +277,8 @@ export const split = (steps: ReadonlyArray<Engine.Step>) => {
       current.push(step)
     }
   }
-  return { frames, last: current }
+  const searched = current[0]?._tag === "AnyFrame"
+  return { frames, last: searched ? current.slice(1) : current, searched }
 }
 
 /** A request's steps; none for a request about the document itself. */
@@ -302,6 +313,7 @@ const retarget = <R extends Engine.Request | Engine.CooperativeRequest>(
   switch (request.op) {
     case "act":
     case "expect":
+    case "change":
       return { ...request, steps: at, cap: missing ? Math.min(request.cap, missingCap) : request.cap }
     default:
       return { ...request, steps: at }
@@ -411,14 +423,24 @@ const decode = (text: string): Effect.Effect<Engine.Response, SendFailure> =>
 
 /** The one match in a document, by its node binding, or the engine's answer for why there is none. */
 type Element =
-  | { readonly _tag: "Found"; readonly node: Adapter.NodeBinding }
+  | {
+    readonly _tag: "Found"
+    readonly node: Adapter.NodeBinding
+    /** Asked for, the iframe's identity with the frame it holds; `null` when it holds none. */
+    readonly identity?: string | null
+  }
   | { readonly _tag: "Response"; readonly response: Engine.Response }
 
 export const elementIn = (
   runtime: Runtime,
   document: Target.DocumentId,
   steps: ReadonlyArray<Engine.Step>,
-  frame: { readonly scroll: boolean; readonly validationSteps?: ReadonlyArray<Engine.Step> } | null,
+  frame: {
+    readonly scroll: boolean
+    readonly validationSteps?: ReadonlyArray<Engine.Step>
+    /** Answer the iframe with its identity, as a frame hop keeps it. */
+    readonly identify?: boolean
+  } | null,
   id: Diagnostics.OperationId
 ): Effect.Effect<Option.Option<Element>, SendFailure> =>
   callInDocument(
@@ -429,15 +451,30 @@ export const elementIn = (
       steps,
       frame: frame !== null,
       scroll: frame?.scroll ?? false,
-      ...(frame?.validationSteps === undefined ? {} : { validationSteps: frame.validationSteps })
+      ...(frame?.validationSteps === undefined ? {} : { validationSteps: frame.validationSteps }),
+      ...(frame?.identify === true ? { identify: true } : {})
     }),
-    id
+    id,
+    frame?.identify === true ? true : undefined
   ).pipe(
     Effect.flatMap(Option.match({
       onNone: () => Effect.succeedNone,
       onSome: (value) => {
         if (value.type === "node" && value.node !== undefined) {
           return Effect.succeed(Option.some<Element>({ _tag: "Found", node: value.node }))
+        }
+        if (value.type === "array" && value.value?.length === 2) {
+          const [node, identity] = value.value
+          if (
+            node!.type === "node" && node!.node !== undefined &&
+            (identity!.type === "string" || identity!.type === "null")
+          ) {
+            return Effect.succeed(Option.some<Element>({
+              _tag: "Found",
+              node: node!.node,
+              identity: identity!.type === "string" ? identity!.value : null
+            }))
+          }
         }
         if (value.type === "string") {
           return Effect.map(
@@ -449,6 +486,107 @@ export const elementIn = (
       }
     }))
   )
+
+/** Sends `request` to the engine in `document`: `None` when its realm has gone. */
+const askIn = (
+  runtime: Runtime,
+  document: Target.DocumentId,
+  request: Engine.Request,
+  id: Diagnostics.OperationId
+): Effect.Effect<Option.Option<Engine.Response>, SendFailure> =>
+  callInDocument(runtime, document, Engine.run, JSON.stringify(request), id).pipe(
+    Effect.flatMap((value) =>
+      Option.isSome(value) && value.value.type === "string"
+        ? Effect.asSome(decode(value.value.value))
+        : Effect.succeedNone
+    )
+  )
+
+/** Every iframe or frame element of a document's, in tree order, as the engine finds them. */
+const frameElements: ReadonlyArray<Engine.Step> = [{ _tag: "Css", selector: "iframe, frame" }]
+
+/**
+ * The documents of the frames under `document`, at any depth, each with the iframes entered on the way to it. A
+ * frame with no document yet, or one that goes while it's listed, has none, and isn't waited for.
+ */
+const descendants = (
+  runtime: Runtime,
+  document: Target.DocumentId,
+  id: Diagnostics.OperationId,
+  hops: ReadonlyArray<Hop> = []
+): Effect.Effect<Array<{ readonly document: Target.DocumentId; readonly hops: ReadonlyArray<Hop> }>, SendFailure> =>
+  Effect.gen(function*() {
+    const counted = yield* askIn(runtime, document, { op: "count", steps: frameElements }, id)
+    if (Option.isNone(counted) || counted.value._tag !== "Count") return []
+    const found: Array<{ readonly document: Target.DocumentId; readonly hops: ReadonlyArray<Hop> }> = []
+    for (let index = 0; index < counted.value.count; index++) {
+      const steps: ReadonlyArray<Engine.Step> = [...frameElements, { _tag: "Nth", index }]
+      const element = yield* elementIn(runtime, document, steps, { scroll: false, identify: true }, id)
+      if (Option.isNone(element) || element.value._tag !== "Found") continue
+      const identity = element.value.identity
+      if (identity === undefined || identity === null) continue
+      const frame = yield* runtime.model.adapter.contentFrame(element.value.node).pipe(
+        Effect.catch((error) =>
+          isMoved(error) ? Effect.succeedNone : Effect.fail(fromAdapter(error, id, runtime.backend))
+        )
+      )
+      if (Option.isNone(frame)) continue
+      const child = yield* runtime.model.documentOf(frame.value)
+      if (Option.isNone(child)) continue
+      const path = [...hops, { document, steps, frame: frame.value, identity }]
+      found.push({ document: child.value, hops: path }, ...yield* descendants(runtime, child.value, id, path))
+    }
+    return found
+  })
+
+/** Where a search across frames goes: the one document `steps` match in, none, or the engine's answer. */
+type Search =
+  | { readonly _tag: "One"; readonly document: Target.DocumentId; readonly hops: ReadonlyArray<Hop> }
+  | { readonly _tag: "None" }
+  | { readonly _tag: "Answer"; readonly response: Engine.Response }
+
+/**
+ * Tests `steps` in `document` and in the document of each frame under it: they go on in the one with matches, and
+ * more than one is a strictness failure, whichever loaded first. A frame with no document yet is skipped. Steps that begin with a snapshot's ref go to the ref's own document, when it is one of these.
+ */
+const search = (
+  runtime: Runtime,
+  document: Target.DocumentId,
+  steps: ReadonlyArray<Engine.Step>,
+  id: Diagnostics.OperationId
+): Effect.Effect<Search, SendFailure> =>
+  Effect.gen(function*() {
+    const documents = [{ document, hops: [] as ReadonlyArray<Hop> }, ...yield* descendants(runtime, document, id)]
+    const enter = (each: (typeof documents)[number]): Search => ({ _tag: "One", ...each })
+    const first = steps[0]
+    if (first !== undefined && first._tag === "Ref") {
+      const owner = documents.find((each) => each.document === first.document)
+      return owner === undefined
+        ? { _tag: "Answer", response: { _tag: "StaleRef", why: "Replaced" } }
+        : enter(owner)
+    }
+    const matched: Array<{ readonly each: (typeof documents)[number]; readonly response: Engine.Response }> = []
+    for (const each of documents) {
+      const found = yield* askIn(runtime, each.document, { op: "candidates", steps }, id)
+      if (Option.isNone(found)) continue
+      if (found.value._tag !== "Strict") return { _tag: "Answer", response: found.value }
+      if (found.value.count > 0) matched.push({ each, response: found.value })
+    }
+    if (matched.length === 0) return { _tag: "None" }
+    if (matched.length === 1) return enter(matched[0]!.each)
+    const answers = matched.map((match) => match.response as Extract<Engine.Response, { _tag: "Strict" }>)
+    return {
+      _tag: "Answer",
+      response: {
+        _tag: "Strict",
+        count: answers.reduce((total, each) => total + each.count, 0),
+        visible: answers.reduce((total, each) => total + each.visible, 0),
+        frames: answers.length,
+        // A sample, as in one document: the first ten, in frame order
+        candidates: answers.flatMap((each) => each.candidates).slice(0, 10)
+      }
+    }
+  })
 
 /** Where a locator's frames lead now: the document of its last frame, or why it can't be reached yet. */
 type Route =
@@ -469,13 +607,30 @@ const route = (
   Effect.gen(function*() {
     let document = top
     const hops: Array<Hop> = []
-    for (const steps of frames) {
+    const { last, searched } = split(validationSteps)
+    const parts = [...frames, ...(searched ? [[{ _tag: "AnyFrame" } as const, ...last]] : [])]
+    for (const [index, part] of parts.entries()) {
+      let steps = part
+      if (part[0]?._tag === "AnyFrame") {
+        steps = part.slice(1)
+        const found = yield* search(runtime, document, steps, id)
+        if (found._tag !== "One") {
+          const routed = { document, hops }
+          return Option.some<Route>(
+            found._tag === "None" ? { _tag: "Missing", routed } : { _tag: "Answer", routed, response: found.response }
+          )
+        }
+        hops.push(...found.hops)
+        document = found.document
+      }
+      if (index === frames.length) break
       const stale = replaced(document, steps)
       if (Option.isSome(stale)) {
         return Option.some<Route>({ _tag: "Answer", routed: { document, hops }, response: stale.value })
       }
       const found = yield* elementIn(runtime, document, steps, {
         scroll,
+        identify: true,
         ...(hops.length === 0 ? { validationSteps } : {})
       }, id)
       if (Option.isNone(found)) {
@@ -500,7 +655,9 @@ const route = (
       if (Option.isNone(frame.value)) return Option.some<Route>({ _tag: "Missing", routed })
       const next = yield* runtime.model.documentOf(frame.value.value)
       if (Option.isNone(next)) return Option.some<Route>({ _tag: "Missing", routed })
-      hops.push({ document, steps, frame: frame.value.value })
+      const identity = found.value.identity
+      if (identity === undefined || identity === null) return Option.some<Route>({ _tag: "Missing", routed })
+      hops.push({ document, steps, frame: frame.value.value, identity })
       document = next.value
     }
     return Option.some<Route>({ _tag: "Entered", routed: { document, hops } })
@@ -596,6 +753,7 @@ const prepareRound = Effect.fnUntraced(function*(
         scroll: request.checks.inViewport,
         cap: request.cap,
         point: null,
+        identity: hop.identity,
         ...(clip === undefined ? {} : { clip })
       }, id)
       if (Option.isNone(answer)) return { _tag: "Moved" } as const
@@ -615,6 +773,8 @@ const prepareRound = Effect.fnUntraced(function*(
         } as const
       }
       if (answer.value._tag !== "Frame") return { _tag: "Answer", answer: { response: answer.value, routed } } as const
+      // Steps that find another iframe than the route's would read another frame's geometry: route again
+      if (answer.value.held !== true) return { _tag: "Moved" } as const
       if (answer.value.scrolled) {
         return {
           _tag: "Answer",
@@ -645,7 +805,12 @@ export const sendRouted = (
   page: Model.PageEntry,
   request: Engine.Request,
   id: Diagnostics.OperationId,
-  at: MonotonicInstant.MonotonicInstant
+  at: MonotonicInstant.MonotonicInstant,
+  /**
+   * Told the document each round's request goes to, before it is sent: a caller that must undo what the request
+   * does there, as a capture's masks, owns it from before it can run.
+   */
+  sending?: ((document: Target.DocumentId) => void) | undefined
 ): Effect.Effect<Answer, SendFailure> =>
   Effect.raceFirst(
     // An action's frames are scrolled into view on its way, so they render (QUIRKS.md, Q110)
@@ -671,6 +836,7 @@ export const sendRouted = (
         // Plain title reads need the same isolated world and replay rules, but none of the query engine.
         // Backends without isolated worlds retain the existing shared-world engine path.
         const directTitle = request.op === "title" && !(yield* makesNoWorlds(runtime))
+        sending?.(routed.document)
         const pending = directTitle
           ? callInDocument(
             runtime,
@@ -1048,7 +1214,7 @@ export const insertText = (
 export const releaseInDocument = (
   runtime: Runtime,
   document: Target.DocumentId,
-  request: Extract<Engine.Request, { readonly op: "validationStop" | "fillDisarm" | "expectStop" }>,
+  request: Extract<Engine.Request, { readonly op: "validationStop" | "fillDisarm" | "expectStop" | "unwatch" }>,
   id: Diagnostics.OperationId
 ): Effect.Effect<void, SendFailure> =>
   Effect.suspend(() => {

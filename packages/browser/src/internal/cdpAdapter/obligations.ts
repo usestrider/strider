@@ -147,6 +147,8 @@ export const register = (handlers: Kit.Handlers<Event>) =>
                 status: params.responseStatusCode as NetworkResponse.StatusCode,
                 statusText: params.responseStatusText ?? "",
                 httpVersion: Option.none(),
+                serverAddress: Option.none(),
+                securityDetails: Option.none(),
                 headers: Headers.fromInput(
                   Object.fromEntries((params.responseHeaders ?? []).map((header) => [header.name, header.value]))
                 ),

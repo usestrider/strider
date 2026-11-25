@@ -200,9 +200,13 @@ const activate = (page: Model.PageEntry, state: State) => {
     }
   )
   Execution.handleWith(page, {
-    url: Effect.fnUntraced(function*(page: Page.ReadonlyPage, expected: string | RegExp) {
-      if (yield* Effect.service(Suppressed)) return yield* ExpectImpl.watchURL(page, expected)
-      return yield* ExpectImpl.handlerURL(page, expected, (request, record) =>
+    url: Effect.fnUntraced(function*(
+      page: Page.ReadonlyPage,
+      expected: string | RegExp,
+      options?: ExpectImpl.URLOptions | undefined
+    ) {
+      if (yield* Effect.service(Suppressed)) return yield* ExpectImpl.watchURL(page, expected, options)
+      return yield* ExpectImpl.handlerURL(page, expected, options, (request, record) =>
         managed(
           Runtime.sendCooperative<Execution.Failure, never>(
             Handles.page(page).runtime,
@@ -234,6 +238,8 @@ const activate = (page: Model.PageEntry, state: State) => {
           ),
         Runtime.send(runtime, target, request, id, at)
       ),
+    handle: dispatch(Effect.map(check(state, false), (outcome) => outcome === "invalidate"), Effect.succeed(false)),
+    handlers: true,
     beforeCheck: dispatch(check(state, false).pipe(Effect.asVoid), Effect.void)
   })
 }

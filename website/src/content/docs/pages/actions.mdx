@@ -39,11 +39,29 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 | `clear()`                     | empties a field                                                            |
 | `press(key)`                  | focuses the element and presses a key                                      |
 | `pressSequentially(text)`     | focuses the element and types the text key by key                         |
-| `selectOption(choice)`        | chooses a `<select>`'s option by `value`, `label`, or `index`               |
+| `selectOption(choice)`        | chooses a `<select>`'s options by `value`, `label`, or `index`, and returns the values it selected |
 | [`dispatchEvent(type, options)`](/docs/api/browser/Locator#Locator.dispatchEvent) | dispatches an untrusted DOM event without focus or scrolling |
 | `setInputFiles(files)`        | sets a file input's files                                                  |
 | `dragTo(target)`              | presses on the element, moves to the target with the button held, releases |
 | [`focus()`](/docs/api/browser/Locator#Locator.focus), [`scrollIntoView()`](/docs/api/browser/Locator#Locator.scrollIntoView) | focuses it, or scrolls it into view                                        |
+
+On Chromium, a page doesn't see the pointer move into a cross-site frame: its element keeps `:hover` and gets no
+`mouseleave` ([Chromium's differences](/docs/browsers/chromium#differences)).
+
+`selectOption` succeeds with the values of the options it selected that are still selected once its `input` and `change` events have run, in document order. On a `<select>` without `multiple` the action selects only the matching option that comes last in the document, and an empty list of choices deselects everything and gives `[]`. An event handler that selects another option leaves that option out, so the list can be empty:
+
+```ts
+import { Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const chooseToppings = Effect.fn("chooseToppings")(function*(page: Page.Page) {
+  const selected = yield* page.getByLabel("Toppings").selectOption([
+    { value: "olives" },
+    { label: "Basil" }
+  ])
+  yield* Effect.log(`Toppings: ${selected.join(", ")}`)
+})
+```
 
 Select text to inspect a selection or prepare it for the next key without replacing the contents:
 

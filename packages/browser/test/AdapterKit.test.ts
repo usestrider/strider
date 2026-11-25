@@ -180,8 +180,18 @@ describe("AdapterKit", () => {
       const a = Kit.expect(ids, expectations, "http://a")
       const b = Kit.expect(ids, expectations, "http://b/")
       assert.strictEqual(Kit.take(expectations, "http://b")?.id, b)
-      assert.strictEqual(Kit.take(expectations, "http://elsewhere/")?.id, a)
+      assert.strictEqual(Kit.take(expectations, "http://a/")?.id, a)
       assert.isUndefined(Kit.take(expectations, "http://a/"))
+    })
+
+    it("gives a navigation announced for another URL no command's expectation, but one with no URL", () => {
+      const ids = Kit.makeIds()
+      const expectations = Kit.makeExpectations()
+      const a = Kit.expect(ids, expectations, "http://a/")
+      assert.isUndefined(Kit.take(expectations, "http://elsewhere/"))
+      const traversal = Kit.expect(ids, expectations, "", "traversal")
+      assert.strictEqual(Kit.take(expectations, "http://elsewhere/")?.id, traversal)
+      assert.strictEqual(Kit.take(expectations, "")?.id, a)
     })
 
     it.effect("reports a navigation that never started once, even when its event slips in before the report", () =>
@@ -369,5 +379,32 @@ describe("AdapterKit", () => {
       const destroyed = Kit.realmFailure(live)(ended).reason
       assert.strictEqual(destroyed._tag === "Gone" ? destroyed.reason._tag : undefined, "RealmDestroyed")
     })
+  })
+})
+
+describe("consoleMethod", () => {
+  it("names each wire's console method as the Console Standard does", () => {
+    // CDP's types
+    assert.strictEqual(Kit.consoleMethod("warning"), "warn")
+    assert.strictEqual(Kit.consoleMethod("startGroup"), "group")
+    assert.strictEqual(Kit.consoleMethod("startGroupCollapsed"), "groupCollapsed")
+    assert.strictEqual(Kit.consoleMethod("endGroup"), "groupEnd")
+    assert.strictEqual(Kit.consoleMethod("timeEnd"), "timeEnd")
+    assert.strictEqual(Kit.consoleMethod("count"), "count")
+    // BiDi's methods are the Standard's own
+    assert.strictEqual(Kit.consoleMethod("warn"), "warn")
+    assert.strictEqual(Kit.consoleMethod("groupEnd"), "groupEnd")
+    assert.strictEqual(Kit.consoleMethod("timeLog"), "timeLog")
+    // WebKit's `timing` is both `timeLog` and `timeEnd`
+    assert.strictEqual(Kit.consoleMethod("timing", "log"), "timeEnd")
+  })
+
+  it("reads a message whose wire names no method as its level's method", () => {
+    assert.strictEqual(Kit.consoleMethod("log", "warning"), "warn")
+    assert.strictEqual(Kit.consoleMethod("log", "error"), "error")
+    assert.strictEqual(Kit.consoleMethod(undefined, "debug"), "debug")
+    assert.strictEqual(Kit.consoleMethod("image", "info"), "info")
+    assert.strictEqual(Kit.consoleMethod("log"), "log")
+    assert.strictEqual(Kit.consoleMethod(undefined), "log")
   })
 })

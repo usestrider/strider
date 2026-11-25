@@ -4,8 +4,8 @@ export const transform = (url, source) => {
   const mark = (name) => `globalThis.__navigationTrace.mark(${JSON.stringify(name)});`
   const rules = [
     ["/chromium/Chromium.ts", [[
-      "CdpAdapter.connect(transport, { sink, ownership: \"launched\", exited: launched.handle.exitCode })",
-      "CdpAdapter.connect(globalThis.__navigationTrace.transport(transport), { sink, ownership: \"launched\", exited: launched.handle.exitCode })"
+      "CdpAdapter.connect(transport, {\n          sink,\n          ownership: \"launched\",",
+      "CdpAdapter.connect(globalThis.__navigationTrace.transport(transport), {\n          sink,\n          ownership: \"launched\","
     ]]],
     ["/internal/runtime.ts", [
       [

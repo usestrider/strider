@@ -73,6 +73,18 @@ const probe = (file: string) => {
   return info
 }
 
+const frameTimes = (file: string): Array<number> =>
+  JSON.parse(execFileSync(process.env["STRIDER_FFPROBE"]!, [
+    "-v",
+    "error",
+    "-show_frames",
+    "-of",
+    "json",
+    file
+  ], { encoding: "utf8" })).frames.map((frame: { best_effort_timestamp_time: string }) =>
+    Number(frame.best_effort_timestamp_time)
+  )
+
 describe("WebKit polled video", () => {
   for (const [enabled, writer] of [[false, false], [true, false], [false, true]] as const) {
     it.live(`refuses video with polling=${enabled}, writer=${writer}`, () =>
@@ -111,6 +123,55 @@ describe("WebKit polled video", () => {
         "1 hour"
       )
     })), 15_000)
+
+  it.live(
+    "sizes a recording by default when the page navigates as it is acquired",
+    () =>
+      run(launched(Effect.gen(function*() {
+        const { origin } = yield* site
+        const page = yield* Browser.newPage()
+        yield* page.goto(`${origin}/fixture?html=${encodeURIComponent("<p>before</p>")}`)
+        const recording = yield* Effect.scoped(Effect.gen(function*() {
+          const video = yield* page.capability(Capability.Video)
+          yield* page.goto(`${origin}/fixture?html=${encodeURIComponent("<p>after</p>")}`)
+          yield* Effect.sleep("300 millis")
+          return video
+        }))
+        const video = probe(yield* recording.file).streams[0]
+        assert.isAtMost(Math.max(video.width, video.height), 800)
+        assert.isAbove(Math.min(video.width, video.height), 0)
+      }))),
+    30_000
+  )
+
+  it.live(
+    "writes to a path at a size and frame rate in place of the layer's directory",
+    () =>
+      run(launched(Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "strider-webkit-video-path-" })
+        const target = `${directory}/run.webm`
+        const page = yield* Browser.newPage({ emulation: { viewport: { width: 640, height: 480 } } })
+        const recording = yield* Effect.scoped(Effect.gen(function*() {
+          const video = yield* page.capability(Capability.Video, {
+            path: target,
+            size: { width: 320, height: 200 },
+            fps: 10
+          })
+          yield* Effect.sleep("500 millis")
+          return video
+        }))
+        assert.strictEqual(yield* recording.file, target)
+        const video = probe(target).streams[0]
+        assert.deepStrictEqual([video.width, video.height], [320, 200])
+        // Frames every 100 milliseconds, the last of them the one-millisecond end marker at the rounded stop time
+        const times = frameTimes(target)
+        assert.isAtLeast(times.length, 3)
+        for (let index = 1; index < times.length; index++) assert.closeTo(times[index]! - times[index - 1]!, 0.1, 0.001)
+        assert.deepStrictEqual(yield* fs.readDirectory(directory), ["run.webm"])
+      }))),
+    30_000
+  )
 
   it.live(
     "records timestamped samples, survives navigation and fits resized PNGs",

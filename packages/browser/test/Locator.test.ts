@@ -793,7 +793,8 @@ describe("Locator.blur", () => {
                   point: null,
                   draggable: false,
                   checked: null,
-                  fill: null
+                  fill: null,
+                  selected: null
                 })
               }
             } as const
@@ -1026,7 +1027,8 @@ it.effect("does not acknowledge native fill while its insertion guard is still p
                 point: null,
                 draggable: false,
                 checked: null,
-                fill: request.apply ? "guarded" : null
+                fill: request.apply ? "guarded" : null,
+                selected: null
               })
             }
           } as const
@@ -1106,7 +1108,8 @@ const guardCleanup = Effect.fnUntraced(function*(disarm: "gone" | "missing", end
               point: null,
               draggable: false,
               checked: null,
-              fill: request.apply ? "guarded" : null
+              fill: request.apply ? "guarded" : null,
+              selected: null
             })
           }
         } as const
@@ -1215,7 +1218,8 @@ for (const boundary of ["unanswered", "set", "type", "guarded", "confirmed"] as 
                   point: null,
                   draggable: false,
                   checked: null,
-                  fill: request.apply ? (boundary === "confirmed" ? "guarded" : boundary) : null
+                  fill: request.apply ? (boundary === "confirmed" ? "guarded" : boundary) : null,
+                  selected: null
                 })
               }
             } as const
@@ -1503,7 +1507,8 @@ describe("an action whose engine call is unanswered at the deadline", () => {
                       point: { x: 1, y: 1 },
                       draggable: false,
                       checked: null,
-                      fill: null
+                      fill: null,
+                      selected: null
                     })
                   }
                 } as const
@@ -1618,5 +1623,38 @@ describe("UserContext.Options.testIdAttribute", () => {
         [qa, qa]
       )
       assert.deepStrictEqual(testIds(sibling.locator("li").filter({ has: relative })), [standard])
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+})
+
+describe("Page.anyFrame", () => {
+  it.effect("prints the search where the chain starts it", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      assert.strictEqual(String(page.anyFrame.locator("#x")), `Locator(page.anyFrame.locator("#x"))`)
+      assert.strictEqual(
+        String(page.frame(page.locator("iframe")).anyFrame.getByRole("button")),
+        `Locator(page.frame(page.locator("iframe")).anyFrame.getByRole("button"))`
+      )
+      assert.strictEqual(
+        String(page.anyFrame.frame(page.anyFrame.locator("#checkout")).locator("a")),
+        `Locator(page.frame(page.anyFrame.locator("#checkout")).locator("a"))`
+      )
+    }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
+
+  it.effect("takes operands from the same search, and refuses one from outside it or from another", () =>
+    Effect.gen(function*() {
+      const page = yield* Browser.newPage()
+      const search = page.anyFrame
+      const pay = search.getByRole("button", { name: "Pay" })
+      // Built from the same search: accepted
+      pay.or(search.locator("#pay"))
+      pay.and(search.locator("button"))
+      // From outside the search
+      assert.throws(() => pay.or(page.locator("#pay")), /another frame/)
+      assert.throws(() => pay.and(page.frame(page.locator("iframe")).locator("button")), /another frame/)
+      // Starting a search of its own, below a frame
+      assert.throws(() => pay.or(page.frame(page.locator("iframe")).anyFrame.locator("#pay")), /another frame/)
+      // An iframe for `frame` comes from the search too
+      assert.throws(() => search.frame(page.locator("iframe")), /isn't in this frame/)
     }).pipe(Effect.scoped, Effect.provide(Browser.layerTest(""))))
 })

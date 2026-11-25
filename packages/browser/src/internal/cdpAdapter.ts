@@ -81,6 +81,9 @@ export const capabilities = (
         "successful completion only; redirect end may be an observation bound"
       ]),
       entry("input.topLevelDesignMode", "supported"),
+      entry("input.frameBoundaries", "partial", [
+        "a frame in another process sees the pointer leave it; the page's documents see no leave as it enters one"
+      ]),
       entry("userContexts", "supported"),
       entry("acceptInsecureCerts", "partial", [
         "per-page certificate override on each of the context's pages; refused for a reclaimable context"
@@ -123,6 +126,12 @@ export const capabilities = (
       entry("console", "supported"),
       entry("console.arguments", "supported"),
       entry("console.source", "supported"),
+      entry("console.method", "partial", [
+        "`console.timeLog` reads as `log`, since Chromium sends it as a plain message",
+        "`console.countReset`, `timeLog`, and `timeEnd` of a counter or timer that doesn't exist read as `warn`, since " +
+        "Chromium sends them as a warning",
+        "`console.countReset` of a counter that exists writes no message, since Chromium sends none for it"
+      ]),
       entry("prompts", "supported"),
       entry("prompts.kind", "supported"),
       entry("navigation.sameDocument", "supported"),
@@ -341,6 +350,8 @@ export const connect: (
       Option.isSome(contextIds) ? contextIds.value.defaultBrowserContextId : undefined,
       true
     )
+    // Each of its pages gets the certificate override, which ends with the connection, as a launched browser does
+    if (options.acceptInsecureCerts === true) defaultEntry.ignoreCertificateErrors = true
     state.contexts.set(state.defaultContext, defaultEntry)
     if (defaultEntry.browserContextId !== undefined) {
       state.contextsByCdp.set(defaultEntry.browserContextId, defaultEntry)
@@ -417,7 +428,7 @@ export const connect: (
       pdf: (page, options) => Capture.pdf(state, page, options),
       accessibilityTree: (page) => Capture.accessibilityTree(state, page),
       screencast: (page) => Capture.screencast(state, page),
-      video: (page) => Capture.video(state, page, writer),
+      video: (page, options) => Capture.video(state, page, options, writer),
       createAuthenticator: (page) => WebAuthn.create(state, page),
       releaseAuthenticator: (ref) => WebAuthn.release(state, ref),
       authenticatorCredentials: (ref) => WebAuthn.credentials(state, ref),

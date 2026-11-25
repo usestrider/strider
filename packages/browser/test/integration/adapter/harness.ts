@@ -304,6 +304,11 @@ self.addEventListener("fetch", (event) => {
     response.writeHead(200, { "content-type": "image/svg+xml" })
     response.write("<svg xmlns=\"http://www.w3.org/2000/svg\">")
   },
+  // A page that never finishes loading, until the page closes or replaces it
+  "/pending-page": (_request, response) => {
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+    response.write("<!doctype html><title>pending</title>")
+  },
   // A script that never completes: a deferred one holds DOMContentLoaded back while the page is interactive
   "/pending-script": (_request, response) => {
     response.writeHead(200, { "content-type": "text/javascript" })

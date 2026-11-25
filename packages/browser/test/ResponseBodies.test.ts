@@ -22,6 +22,8 @@ const response = new NetworkResponse.NetworkResponse({
   status: 200 as NetworkResponse.StatusCode,
   statusText: "OK",
   httpVersion: Option.none(),
+  serverAddress: Option.none(),
+  securityDetails: Option.none(),
   headers: Headers.empty,
   servedBy: "network",
   at: 0 as NetworkResponse.NetworkResponse["at"]

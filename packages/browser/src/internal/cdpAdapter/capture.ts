@@ -30,6 +30,7 @@ import * as BrowserClock from "../browserClock.ts"
 import * as Operation from "../operation.ts"
 import * as ProtocolClient from "../protocolClient.ts"
 import * as Video from "../video.ts"
+import * as VideoOptions from "../videoOptions.ts"
 import { type CaptureGuard, downloadDirectory, pageOf, type State, type TargetEntry } from "./state.ts"
 
 interface Guard {
@@ -591,15 +592,32 @@ export const makeScreencastClock = () => {
 
 /** Video is another session consumer; timing and its lifetime are independent of the caller's acquisition deadline. */
 export const video = Effect.fnUntraced(
-  function*(state: State, id: L1Target.NavigableId, writer: Option.Option<VideoWriter.VideoWriter>) {
+  function*(
+    state: State,
+    id: L1Target.NavigableId,
+    options: Adapter.VideoOptions,
+    writer: Option.Option<VideoWriter.VideoWriter>
+  ) {
     if (Option.isNone(writer)) {
       return yield* Effect.fail(Kit.unsupported("capability.video", "Chromium video requires a VideoWriter service"))
     }
     const page = yield* pageOf(state, id)
-    const directory = downloadDirectory(state, page.context.id)
+    const directory = Option.orElse(options.directory, () => downloadDirectory(state, page.context.id))
     if (Option.isNone(directory)) {
       return yield* Effect.fail(Kit.unsupported("capability.video", "The context must allow downloads to a directory"))
     }
+    // Without a size, the window's layout viewport in CSS pixels, read on the page's session, which a navigation
+    // keeps, unlike a realm
+    const size = Option.isSome(options.size)
+      ? options.size.value
+      : yield* layoutMetrics(page.target.session).pipe(
+        Effect.map((metrics) =>
+          VideoOptions.defaultSize({
+            width: metrics.cssLayoutViewport.clientWidth,
+            height: metrics.cssLayoutViewport.clientHeight
+          })
+        )
+      )
     return yield* Video.record(
       Effect.gen(function*() {
         const frames = yield* screencastDeliveries(state, id)
@@ -622,7 +640,8 @@ export const video = Effect.fnUntraced(
         }
       }),
       writer.value,
-      directory.value
+      directory.value,
+      { size: Option.some(size), fps: options.fps }
     )
   }
 )

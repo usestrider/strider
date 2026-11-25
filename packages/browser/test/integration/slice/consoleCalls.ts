@@ -20,7 +20,7 @@ const fixtureUrl = (origin: string, html: string) => `${origin}/fixture?html=${e
 const opened = Effect.fnUntraced(function*(html = "<p>console</p>") {
   const { origin } = yield* site
   const page = yield* newPage
-  yield* page.goto(fixtureUrl(origin, html))
+  yield* page.goto(fixtureUrl(origin, html), { waitUntil: "load" })
   return page
 })
 

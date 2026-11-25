@@ -157,6 +157,10 @@ or a CORS failure as a script error, so it arrives as an [`UncaughtException`](/
 every console message's [`source`](/docs/events/console) is `Page`. The capability
 `console.source` is `unsupported` here.
 
+**`console.groupEnd` and `console.clear` write no message.** Firefox sends nothing for them, so neither is in the
+console's [history](/docs/events/console). A counter or timer that doesn't exist keeps its method, at level `log`
+rather than `warning`. The capability `console.method` is `partial` here.
+
 **Typing is key by key.** [Keyboard layouts](/docs/pages/actions#keys) send no AltGr or dead keys, and the page
 sees a US key's `code`. [`insertText`](/docs/pages/actions#the-keyboard-and-the-mouse) and `fill` send no key
 events to insert text, but the `beforeinput` before the text is Strider's own, since Firefox fires none: its
@@ -166,7 +170,9 @@ Firefox's own.
 **HTML drag and drop needs [`html: "synthetic"`](/docs/pages/actions#dragging):** Firefox starts a native drag but never drops it.
 
 **Input into a cross-site frame goes to the frame's document,** since Firefox doesn't route page coordinates into
-it. A drag between documents goes to the first one alone: while a button pressed in a cross-site frame is held, a
+it. Strider also moves the pointer of each document above the frame onto its `iframe` as it enters, and moves the
+frame's to its right edge as it leaves, so every document it crosses, frames nested in frames included, fires its
+`mouseover`, `mouseout`, `mouseenter`, and `mouseleave`. A drag between documents goes to the first one alone: while a button pressed in a cross-site frame is held, a
 [`page.mouse`](/docs/pages/actions#the-keyboard-and-the-mouse) move outside the frame isn't sent, and the release is sent at the
 pointer's last point inside it.
 
@@ -175,7 +181,7 @@ pointer's last point inside it.
 `Unsupported`, and the request continues as it was.
 
 **Video, not frames.** [`Capability.Video`](/docs/api/browser/Capability#Video) records a WebM file into the context's downloads
-directory; [`Capability.Screencast`](/docs/api/browser/Capability#Screencast) isn't available. A trace's
+directory, or to the [`path`](/docs/tools/video#size-frame-rate-and-path) you give it; [`Capability.Screencast`](/docs/api/browser/Capability#Screencast) isn't available. A trace's
 [`screencast: "native"`](/docs/tools/recordings#traces) uses the video. Firefox needs no
 [`VideoWriter`](/docs/tools/video#what-each-browser-needs), unlike Chromium. To record one around a step, take the
 capability for that scope with `page.capability`:

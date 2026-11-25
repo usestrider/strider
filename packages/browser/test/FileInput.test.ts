@@ -119,7 +119,8 @@ describe("FileInput across a connection", () => {
                 point: null,
                 draggable: false,
                 checked: null,
-                fill: null
+                fill: null,
+                selected: null
               }
             }))
             const element = vi.spyOn(Runtime, "element").mockReturnValue(
@@ -391,7 +392,8 @@ describe("a local read under the deadline", () => {
           point: null,
           draggable: false,
           checked: null,
-          fill: null
+          fill: null,
+          selected: null
         }
       }))
       yield* Effect.addFinalizer(() => Effect.sync(() => ready.mockRestore()))
