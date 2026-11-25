@@ -193,6 +193,7 @@ export const capabilities = (info: Browser.Info, ownership: Adapter.ConnectOptio
       entry("input.keyboardLayout", "partial", [
         "WebDriver BiDi sends a key as its value: the code is Firefox's for that key on a US keyboard, and there is no AltGr or dead key"
       ]),
+      entry("input.mediaKeys", "unsupported", ["WebDriver has no keys for the audio and media keys"]),
       entry("input.dragAndDrop", "unsupported", [
         "Firefox starts an HTML drag from WebDriver actions, and never drops it"
       ]),

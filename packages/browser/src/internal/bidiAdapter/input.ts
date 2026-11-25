@@ -10,6 +10,7 @@ import * as Script from "../../bidi-protocol/Script.ts"
 import type * as L1Target from "../../Target.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Keys from "../keys.ts"
 import * as Operation from "../operation.ts"
 import { buttons, keyValue } from "./mapping.ts"
 import { documentOf, navigableById, type NavigableEntry, navigableOf, type State } from "./state.ts"
@@ -232,6 +233,12 @@ export const dispatchInput = Effect.fnUntraced(
     const frameless = frame === undefined && lands === undefined
     // Whatever fails before the actions are written sent nothing
     const navigable = yield* navigableById(state, id).pipe(Effect.mapError(Adapter.unsent))
+    const media = events.find((event) => event._tag === "Key" && Keys.mediaKeys.has(event.code))
+    if (media?._tag === "Key") {
+      return yield* Effect.fail(Adapter.unsent(
+        Kit.unsupported("input.mediaKeys", `WebDriver has no key for ${media.code}`)
+      ))
+    }
     // Firefox doesn't deliver page coordinates into a frame of another origin, so input aimed inside a frame goes to
     // the frame's own context, in its own coordinates
     const target = frame === undefined ? undefined : state.navigablesById.get(frame.frame)
@@ -332,7 +339,7 @@ export const dispatchInput = Effect.fnUntraced(
           if (event.key === "AltGraph" || event.key === "Dead") break
           key().push({
             type: event.type === "down" ? "keyDown" : "keyUp",
-            value: Redacted.make(keyValue(event.key))
+            value: Redacted.make(keyValue(event.key, event.code))
           })
           break
         case "InsertText":

@@ -10,6 +10,7 @@ import * as Automation from "../../webkit-automation-protocol/Automation.ts"
 import * as Runtime from "../../webkit-stock-protocol/Runtime.ts"
 import * as Adapter from "../adapter.ts"
 import * as Kit from "../adapterKit.ts"
+import * as Keys from "../keys.ts"
 import type * as WebKitAutomation from "../webkitAutomation.ts"
 import { automationOf, pageHandleOf, processOfContext, resultOf, settleDialog } from "./automation.ts"
 import { answered, documentOf, type FrameEntry, pageOf, type State, targetOf } from "./state.ts"
@@ -37,12 +38,38 @@ const virtualKeys: Readonly<Record<string, Automation.VirtualKey>> = {
   Insert: "Insert",
   ...Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`F${index + 1}`, `Function${index + 1}`]))
 } as Readonly<Record<string, Automation.VirtualKey>>
-const heldKeys = (modifiers: Adapter.Modifiers): Array<Automation.VirtualKey> => [
-  ...(modifiers.shift ? ["Shift" as const] : []),
-  ...(modifiers.control ? ["Control" as const] : []),
-  ...(modifiers.alt ? ["Alternate" as const] : []),
-  ...(modifiers.meta ? ["Meta" as const] : [])
+// Automation's keys for the codes that tell a key apart from its key: the right-hand modifiers and the numeric
+// keypad, which WebKitGTK types with Num Lock on
+const virtualCodes = {
+  ShiftRight: "ShiftRight",
+  ControlRight: "ControlRight",
+  AltRight: "AlternateRight",
+  MetaRight: "MetaRight",
+  ...Object.fromEntries(Array.from({ length: 10 }, (_, digit) => [`Numpad${digit}`, `NumberPad${digit}`])),
+  NumpadMultiply: "NumberPadMultiply",
+  NumpadAdd: "NumberPadAdd",
+  NumpadSubtract: "NumberPadSubtract",
+  NumpadDecimal: "NumberPadDecimal",
+  NumpadDivide: "NumberPadDivide"
+} as Readonly<Record<string, Automation.VirtualKey>>
+const rightHand: Readonly<Record<string, Automation.VirtualKey>> = {
+  ShiftRight: "ShiftRight",
+  ControlRight: "ControlRight",
+  AltRight: "AlternateRight",
+  MetaRight: "MetaRight"
+}
+/**
+ * The modifiers held, as Automation's keys: a modifier's right-hand key where that is the one held, since a state
+ * naming the left one would release the right and press the left.
+ */
+const heldKeys = (modifiers: Adapter.Modifiers, right: ReadonlySet<string>): Array<Automation.VirtualKey> => [
+  ...(modifiers.shift ? [right.has("ShiftRight") ? "ShiftRight" as const : "Shift" as const] : []),
+  ...(modifiers.control ? [right.has("ControlRight") ? "ControlRight" as const : "Control" as const] : []),
+  ...(modifiers.alt ? [right.has("AltRight") ? "AlternateRight" as const : "Alternate" as const] : []),
+  ...(modifiers.meta ? [right.has("MetaRight") ? "MetaRight" as const : "Meta" as const] : [])
 ]
+/** The right-hand modifiers each page holds, across sequences, as `keyboard.hold` leaves them. */
+const rightHeld = new WeakMap<object, Set<string>>()
 const capitalized = (button: string) => (button.charAt(0).toUpperCase() + button.slice(1)) as Automation.MouseButton
 const heldButton = (buttons: number): Automation.MouseButton | undefined =>
   buttons & 1
@@ -75,6 +102,16 @@ export const dispatchInputLaunched = Effect.fnUntraced(
           Kit.unsupported("input.touch", "WebKitGTK builds its Automation without touch (QUIRKS.md, Q214)")
         ))
       }
+      if (event._tag === "Key" && Keys.mediaKeys.has(event.code)) {
+        return yield* Effect.fail(Adapter.unsent(
+          Kit.unsupported("input.mediaKeys", `stock WebKit's Automation has no key for ${event.code}`)
+        ))
+      }
+      if (event._tag === "Key" && event.code === "NumpadEnter") {
+        return yield* Effect.fail(Adapter.unsent(
+          Kit.unsupported("input.keyboardLayout", "stock WebKit's Automation has one Enter key, the main one")
+        ))
+      }
       if (event._tag === "Key" && virtualKeys[event.key] === undefined && [...event.key].length !== 1) {
         return yield* Effect.fail(Adapter.unsent(
           Kit.unsupported(
@@ -85,6 +122,8 @@ export const dispatchInputLaunched = Effect.fnUntraced(
       }
     }
     const handle = yield* pageHandleOf(state, page).pipe(Effect.mapError(Adapter.unsent))
+    let right = rightHeld.get(page)
+    if (right === undefined) rightHeld.set(page, right = new Set())
     const process = yield* processOfContext(state, page.context).pipe(Effect.mapError(Adapter.unsent))
     let wheel = state.wheelStates.get(process.key)
     if (wheel === undefined) state.wheelStates.set(process.key, wheel = { width: 0, height: 0 })
@@ -110,7 +149,7 @@ export const dispatchInputLaunched = Effect.fnUntraced(
           // A state makes an event only when it names its interaction; the button is the one it moves
           const button = event.button === "none" ? heldButton(event.buttons) : capitalized(event.button)
           steps.push([
-            { sourceId: "keyboard", pressedVirtualKeys: heldKeys(event.modifiers) },
+            { sourceId: "keyboard", pressedVirtualKeys: heldKeys(event.modifiers, right) },
             {
               sourceId: "mouse",
               origin: "Viewport",
@@ -125,7 +164,7 @@ export const dispatchInputLaunched = Effect.fnUntraced(
           wheel.width += Math.round(event.deltaX)
           wheel.height += Math.round(event.deltaY)
           steps.push([
-            { sourceId: "keyboard", pressedVirtualKeys: heldKeys(event.modifiers) },
+            { sourceId: "keyboard", pressedVirtualKeys: heldKeys(event.modifiers, right) },
             {
               sourceId: "wheel",
               origin: "Viewport",
@@ -135,9 +174,13 @@ export const dispatchInputLaunched = Effect.fnUntraced(
           ])
           break
         case "Key": {
-          const named = virtualKeys[event.key]
-          const held = heldKeys(event.modifiers)
+          const named = virtualCodes[event.code] ?? virtualKeys[event.key]
           const pressed = event.type === "down"
+          if (rightHand[event.code] !== undefined) {
+            if (pressed) right.add(event.code)
+            else right.delete(event.code)
+          }
+          const held = heldKeys(event.modifiers, right)
           steps.push([{
             sourceId: "keyboard",
             pressedVirtualKeys: pressed && named !== undefined && !held.includes(named) ? [...held, named] : held,

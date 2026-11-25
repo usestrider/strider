@@ -127,6 +127,25 @@ const unsupported = (owner: Owner, capability: string) =>
       )
   })
 
+/**
+ * `Unsupported` for a code that names a layout's place where a US keyboard has another key, on a backend that sends
+ * characters rather than places: it would type the character at its US place (`input.keyboardLayout`).
+ */
+export const placedElsewhere = (owner: Owner, key: string, layout: Keyboard.Layout) =>
+  Effect.map(SubscriptionRef.get(owner.runtime.model.adapter.capabilities), (capabilities) => {
+    if (!Keys.placedOffUs(key, layout)) return Option.none<Reason.Unsupported>()
+    const entry = capabilities.entries.find((each) => each.name === "input.keyboardLayout")
+    return entry === undefined || entry.status === "supported"
+      ? Option.none<Reason.Unsupported>()
+      : Option.some(
+        new Reason.Unsupported({
+          capability: "input.keyboardLayout",
+          backend: owner.runtime.backend,
+          hint: `${key} on the ${layout} layout: ${entry.limitations.join("; ")}`
+        })
+      )
+  })
+
 /** Releases a held input in its scope's finalizer; a release that fails on a live page breaks its input state. */
 const releasing = (
   owner: Owner,
@@ -186,14 +205,19 @@ export const layoutOf = (_runtime: Runtime.Runtime, page: Model.PageEntry): Keyb
   page.contextEntry.state.getUnsafe().settings.keyboardLayout
 
 export const keyboard = (owner: Owner): Keyboard.Keyboard => ({
-  press: (key, options) =>
-    sending(
+  press: Effect.fnUntraced(function*(key: Keyboard.Key | string, options?: Keyboard.PressOptions) {
+    const layout = layoutOf(owner.runtime, owner.page)
+    const elsewhere = yield* placedElsewhere(owner, key, layout)
+    if (Option.isSome(elsewhere)) {
+      return yield* Effect.fail(keyboardError("Keyboard.press")(elsewhere.value, Operation.idNow()))
+    }
+    yield* sending(
       owner,
       "Keyboard.press",
       keyboardError("Keyboard.press"),
-      (state) =>
-        Input.type(state, key, layoutOf(owner.runtime, owner.page), options?.modifiers ?? []) ?? unknownKey(key)
-    ),
+      (state) => Input.type(state, key, layout, options?.modifiers ?? []) ?? unknownKey(key)
+    )
+  }),
   pressSequentially: (text, options) => {
     const characters = Array.from(Redacted.isRedacted(text) ? Redacted.value(text) : text)
     const delay = options?.delay === undefined ? Duration.zero : Duration.fromInputUnsafe(options.delay)
@@ -224,6 +248,10 @@ export const keyboard = (owner: Owner): Keyboard.Keyboard => ({
     const definition = Keys.definition(key, layoutOf(owner.runtime, owner.page))
     if (definition === undefined) {
       return yield* Effect.fail(keyboardError("Keyboard.hold")(unknownKey(key), Operation.idNow()))
+    }
+    const elsewhere = yield* placedElsewhere(owner, key, layoutOf(owner.runtime, owner.page))
+    if (Option.isSome(elsewhere)) {
+      return yield* Effect.fail(keyboardError("Keyboard.hold")(elsewhere.value, Operation.idNow()))
     }
     yield* sending(
       owner,

@@ -103,6 +103,7 @@ export const capabilities = (
       entry("pauseOnStart.frames", "supported"),
       entry("pauseOnStart.workers", "supported"),
       entry("input.keyboardLayout", "supported"),
+      entry("input.mediaKeys", "supported"),
       entry("initScripts.workers", "supported", ["dedicated workers started after the script was declared"]),
       entry(
         "pauseOnStart.popups",

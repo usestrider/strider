@@ -83,8 +83,27 @@ const keyCodes: Readonly<Record<string, number>> = {
   F12: 123
 }
 
-export const keyCode = (key: string): number | undefined => {
-  const known = keyCodes[key]
+// The same for the keys a code tells apart from their key: the numeric keypad's, the right-hand Meta, and the media keys
+const codeKeyCodes: Readonly<Record<string, number>> = {
+  ...Object.fromEntries(Array.from({ length: 10 }, (_, digit) => [`Numpad${digit}`, 96 + digit])),
+  NumpadMultiply: 106,
+  NumpadAdd: 107,
+  NumpadSubtract: 109,
+  NumpadDecimal: 110,
+  NumpadDivide: 111,
+  NumpadEnter: 13,
+  MetaRight: 92,
+  AudioVolumeMute: 173,
+  AudioVolumeDown: 174,
+  AudioVolumeUp: 175,
+  MediaTrackNext: 176,
+  MediaTrackPrevious: 177,
+  MediaPlayPause: 179
+}
+
+/** The Windows virtual key code of a key at `code`: by its code where that tells it apart, else by its key. */
+export const keyCode = (key: string, code: string): number | undefined => {
+  const known = codeKeyCodes[code] ?? keyCodes[key]
   if (known !== undefined) return known
   if (key.length === 1) {
     const upper = key.toUpperCase()

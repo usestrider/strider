@@ -103,7 +103,26 @@ const webdriverKeys: Readonly<Record<string, string>> = {
   Meta: ""
 }
 
-export const keyValue = (key: string): string => webdriverKeys[key] ?? key
+// WebDriver's codes for the keys a code tells apart from their key: the right-hand modifiers and the numeric keypad,
+// which WebDriver types with Num Lock on
+const webdriverCodes: Readonly<Record<string, string>> = {
+  ShiftRight: "\uE050",
+  ControlRight: "\uE051",
+  AltRight: "\uE052",
+  MetaRight: "\uE053",
+  ...Object.fromEntries(
+    Array.from({ length: 10 }, (_, digit) => [`Numpad${digit}`, String.fromCharCode(0xE01A + digit)])
+  ),
+  NumpadMultiply: "\uE024",
+  NumpadAdd: "\uE025",
+  NumpadSubtract: "\uE027",
+  NumpadDecimal: "\uE028",
+  NumpadDivide: "\uE029",
+  NumpadEnter: "\uE007"
+}
+
+/** The value WebDriver sends for a key at `code`: by its code where that tells it apart, else by its key. */
+export const keyValue = (key: string, code: string): string => webdriverCodes[code] ?? webdriverKeys[key] ?? key
 
 export const buttons: Readonly<Record<string, number>> = { none: 0, left: 0, middle: 1, right: 2, back: 3, forward: 4 }
 

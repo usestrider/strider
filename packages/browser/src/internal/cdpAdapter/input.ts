@@ -597,7 +597,7 @@ export const dispatchInput = Effect.fnUntraced(
           }
           if (event.key === "Escape" && event.type === "up" && state.escapeCanceled.delete(page.id)) break
           const text = Option.getOrUndefined(event.text)
-          const code = keyCode(event.key)
+          const code = keyCode(event.key, event.code)
           yield* Kit.protocol(
             Input.dispatchKeyEvent({
               type: event.type === "up" ? "keyUp" : text === undefined ? "rawKeyDown" : "keyDown",
@@ -605,7 +605,8 @@ export const dispatchInput = Effect.fnUntraced(
               code: event.code,
               modifiers: modifierBits(event.modifiers),
               autoRepeat: event.autoRepeat,
-              location: keyLocation(event.code),
+              // Chromium places a key on the keypad by `isKeypad`, and reads `location` only for the left and right
+              ...(keyLocation(event.code) === 3 ? { isKeypad: true } : { location: keyLocation(event.code) }),
               ...(text === undefined ? {} : { text: Redacted.make(text), unmodifiedText: Redacted.make(text) }),
               ...(code === undefined ? {} : { windowsVirtualKeyCode: code, nativeVirtualKeyCode: code })
             }).pipe(onPageSession)

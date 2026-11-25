@@ -930,7 +930,14 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
     return Effect.suspend(() => {
       const layout = Devices.layoutOf(this.owner.runtime, this.owner.page)
       if (Keys.strokes(key, layout) === undefined) return Effect.fail(this.unknownKey("Locator.press", key))
-      return this.act(
+      const placed = Effect.flatMap(
+        Devices.placedElsewhere(this.owner, key, layout),
+        (elsewhere) =>
+          Option.isSome(elsewhere)
+            ? Effect.fail(this.error("Locator.press", elsewhere.value, Operation.idNow()))
+            : Effect.void
+      )
+      return placed.pipe(Effect.andThen(this.act(
         "Locator.press",
         options,
         focusChecks,
@@ -940,7 +947,7 @@ export class LocatorImpl extends Inspectable.Class implements Locator.Locator {
             io.send(Input.type(this.owner.page.inputState, key, layout, options?.modifiers ?? [])!),
             "done" as const
           )
-      )
+      )))
     })
   }
   pressSequentially(text: string | Redacted.Redacted<string>, options?: Locator.TypeOptions) {

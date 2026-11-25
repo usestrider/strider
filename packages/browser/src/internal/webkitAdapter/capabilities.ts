@@ -66,6 +66,7 @@ export const attachedCapabilities = (info: Browser.Info, video = false) => {
       entry("initScripts.workers", "supported", ["dedicated workers started after the script was declared"]),
       entry("input.native", "unsupported", [noInput]),
       entry("input.keyboardLayout", "unsupported", [noInput]),
+      entry("input.mediaKeys", "unsupported", [noInput]),
       entry("input.insertText", "unsupported", [noInput]),
       entry("input.pointerModifiers", "unsupported", [noInput]),
       entry("input.fractionalPointer", "unsupported", [noInput]),
@@ -289,6 +290,7 @@ export const launchedCapabilities = (info: Browser.Info, video = false) => {
     "input.keyboardLayout": ["unsupported", [
       "Automation types characters and named keys, not a layout's physical keys"
     ]],
+    "input.mediaKeys": ["unsupported", ["Automation has no keys for the audio and media keys"]],
     "input.pointerModifiers": ["supported", []],
     "input.fractionalPointer": ["partial", [
       "Strider sends the exact point, but WebKit delivers pointer events at whole pixels, truncating the fraction"

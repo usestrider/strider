@@ -5975,7 +5975,17 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 yield* page.keyboard.hold("ShiftRight")
                 yield* page.keyboard.press("b")
               }))
-              for (const key of ["Numpad1", "NumpadAdd", "NumpadEnter", "Enter"]) yield* page.keyboard.press(key)
+              for (const key of ["Numpad1", "NumpadAdd"]) yield* page.keyboard.press(key)
+              const numpadEnter = page.keyboard.press("NumpadEnter")
+              if (!(yield* supports("input.keyboardLayout"))) {
+                // Stock WebKit's Automation has one Enter key, the main one
+                const error = yield* Effect.flip(numpadEnter)
+                assert(Keyboard.isKeyboardError(error) && error.reason._tag === "Unsupported", String(error))
+                assert.strictEqual(error.reason.capability, "input.keyboardLayout")
+              } else {
+                yield* numpadEnter
+              }
+              yield* page.keyboard.press("Enter")
               yield* field.pipe(Expect.toHaveValue("aB1+"))
               const mute = page.keyboard.press("AudioVolumeMute")
               if (!(yield* supports("input.mediaKeys"))) {
@@ -5988,10 +5998,11 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const expected = {
                 Chromium:
                   "Control:ControlRight:2 a:KeyA:0 Shift:ShiftRight:2+S B:KeyB:0+S 1:Numpad1:3 +:NumpadAdd:3 Enter:NumpadEnter:3 Enter:Enter:0 AudioVolumeMute:AudioVolumeMute:0",
+                // Firefox places WebDriver's Enter, the keypad's, on the left
                 Firefox:
-                  "Control:ControlRight:2 a:KeyA:0 Shift:ShiftRight:2+S B:KeyB:0+S 1:Numpad1:3 +:NumpadAdd:3 Enter:NumpadEnter:3 Enter:Enter:0",
+                  "Control:ControlRight:2 a:KeyA:0 Shift:ShiftRight:2+S B:KeyB:0+S 1:Numpad1:3 +:NumpadAdd:3 Enter:NumpadEnter:1 Enter:Enter:0",
                 WebKit:
-                  "Control:ControlRight:2 a:KeyA:0 Shift:ShiftRight:2 B:KeyB:0 1:Numpad1:3 +:NumpadAdd:3 Enter:NumpadEnter:3 Enter:Enter:0"
+                  "Control:ControlRight:2 a:KeyA:0 Shift:ShiftRight:2+S B:KeyB:0+S 1:Numpad1:3 +:NumpadAdd:3 Enter:Enter:0"
               }[name]
               assert.strictEqual((yield* page.locator("#log").readText).trim(), expected)
             }))
@@ -6018,8 +6029,8 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
                 assert(Keyboard.isKeyboardError(error) && error.reason._tag === "Unsupported", String(error))
                 assert.strictEqual(error.reason.capability, "input.keyboardLayout")
                 // A code where a US keyboard types the same key is sent
-                yield* page.keyboard.press("KeyA")
-                yield* page.locator("#i").pipe(Expect.toHaveValue("a"))
+                yield* page.keyboard.press("KeyE")
+                yield* page.locator("#i").pipe(Expect.toHaveValue("e"))
                 return
               }
               yield* pressed
