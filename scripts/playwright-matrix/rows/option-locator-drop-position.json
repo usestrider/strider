@@ -1,7 +1,13 @@
 {
-  "status": "missing",
-  "api": [],
-  "notes": "The parent capability is missing; this option is not implemented by that contract.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "DropOptions",
+      "url": "/docs/api/browser/Locator#DropOptions"
+    }
+  ],
+  "notes": "Use DropOptions.position, from the top left of the element's padding box.",
   "capabilities": [],
   "id": "option-locator-drop-position",
   "upstream": [

@@ -3,9 +3,15 @@
   "upstream": [
     "method:Locator.drop"
   ],
-  "status": "missing",
-  "api": [],
-  "notes": "No corresponding Locator operation. Generic element evaluation can read DOM properties, but does not implement this contract’s actionability, atomicity or handle semantics.",
+  "status": "has",
+  "api": [
+    {
+      "module": "Locator",
+      "symbol": "Locator.drop",
+      "url": "/docs/api/browser/Locator#Locator.drop"
+    }
+  ],
+  "notes": "The page dispatches untrusted drag events on every backend. A drop no dragover handler accepts fails with DropRefused after dragleave; FileInput.remote files are InvalidInput, since dropped files are read by the library.",
   "capabilities": [],
   "audit": {
     "sources": [

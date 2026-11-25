@@ -43,6 +43,7 @@ const openRowMenu = Effect.fn("openRowMenu")(function*(page: Page.Page, name: st
 | [`dispatchEvent(type, options)`](/docs/api/browser/Locator#Locator.dispatchEvent) | dispatches an untrusted DOM event without focus or scrolling |
 | `setInputFiles(files)`        | sets a file input's files                                                  |
 | `dragTo(target)`              | presses on the element, moves to the target with the button held, releases |
+| `drop({ files, data })`      | drops files or data onto the element, with no element dragged              |
 | [`focus()`](/docs/api/browser/Locator#Locator.focus), [`scrollIntoView()`](/docs/api/browser/Locator#Locator.scrollIntoView) | focuses it, or scrolls it into view                                        |
 
 On Chromium, a page doesn't see the pointer move into a cross-site frame: its element keeps `:hover` and gets no
@@ -350,6 +351,27 @@ const moveToDone = Effect.fn("moveToDone")(function*(page: Page.Page, title: str
   const card = page.getByRole("listitem").filter({ hasText: title })
   const done = page.getByRole("list", { name: "Done" })
   yield* card.dragTo(done, { html: "synthetic" })
+})
+```
+
+`drop` drops files or data onto an element, as a drop from outside the page arrives, for upload zones and
+editors. The page dispatches `dragenter` and `dragover` there, with a `DataTransfer` holding the files and the
+data, then `drop` if a `dragover` handler accepted it. If none did, the element gets `dragleave` and `drop` fails
+with `DropRefused`. Files are read by Strider and built in the page, so a `FileInput.remote` path can't be
+dropped:
+
+```ts
+import { FileInput, Page } from "@usestrider/browser"
+import { Effect } from "effect"
+
+const attachNotes = Effect.fn("attachNotes")(function*(page: Page.Page) {
+  yield* page.getByText("Drop files here").drop({
+    files: [
+      FileInput.local("./notes.txt"),
+      FileInput.bytes("todo.txt", "text/plain", new TextEncoder().encode("ship"))
+    ],
+    data: { "text/plain": "From the clipboard" }
+  })
 })
 ```
 
