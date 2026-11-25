@@ -5998,7 +5998,7 @@ export const interaction = (name: "Chromium" | "Firefox" | "WebKit", backend: La
               const expected = {
                 Chromium:
                   "Control:ControlRight:2 a:KeyA:0 Shift:ShiftRight:2+S B:KeyB:0+S 1:Numpad1:3 +:NumpadAdd:3 Enter:NumpadEnter:3 Enter:Enter:0 AudioVolumeMute:AudioVolumeMute:0",
-                // Firefox places WebDriver's Enter, the keypad's, on the left
+                // WebDriver's own key table places its Enter, the keypad's, at the left (location 1)
                 Firefox:
                   "Control:ControlRight:2 a:KeyA:0 Shift:ShiftRight:2+S B:KeyB:0+S 1:Numpad1:3 +:NumpadAdd:3 Enter:NumpadEnter:1 Enter:Enter:0",
                 WebKit:

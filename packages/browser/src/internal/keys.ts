@@ -169,7 +169,10 @@ const shifted = new Map<Keyboard.Layout, ReadonlyMap<string, string>>(
   ])
 )
 
-/** A key's definition on a layout: a named key, or a character's own key; `undefined` for what isn't a key. */
+/**
+ * A key's definition on a layout: a named key, a code's key (what the layout types at it), or a character's own key;
+ * `undefined` for what isn't a key.
+ */
 export const definition = (key: string, layout: Keyboard.Layout = "us"): Definition | undefined => {
   const known = named.get(key) ?? coded(key, layout)
   if (known !== undefined) return known

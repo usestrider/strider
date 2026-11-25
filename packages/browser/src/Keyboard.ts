@@ -22,7 +22,22 @@ import type * as Target from "./Target.ts"
 
 /**
  * Schema for a key name: a key value, such as `"Enter"`, `"a"`, or `"ArrowDown"`, or a key's code, such as
- * `"ControlRight"`, `"Numpad1"`, or `"KeyW"`.
+ * `"ControlRight"`, `"Numpad1"`, or `"KeyW"`, as `Keyboard.Key` describes.
+ *
+ * **Example** (Steering with the keys a game reads by place)
+ *
+ * ```ts import.meta.vitest
+ * import { Keyboard, Page } from "@usestrider/browser"
+ * import { Effect, Schema } from "effect"
+ *
+ * const forward = Schema.decodeUnknownSync(Keyboard.Key)("KeyW")
+ *
+ * const steer = Effect.fn("steer")(function*(page: Page.Page) {
+ *   yield* page.keyboard.press(forward)
+ *   yield* page.keyboard.press("ShiftRight")
+ *   yield* page.keyboard.press("Numpad8")
+ * })
+ * ```
  *
  * @stability unstable
  * @category schemas
@@ -48,9 +63,28 @@ export const Key = Schema.String.pipe(Schema.brand("~@usestrider/browser/Keyboar
  * **Gotchas**
  *
  * - Only Chromium sends the media keys; Firefox and WebKit refuse them with `Unsupported` (`input.mediaKeys`).
- * - Firefox and WebKit send a character rather than a place, so a code whose layout's character a US keyboard has
- *   elsewhere, such as `"KeyQ"` on `fr`, fails there with `Unsupported` (`input.keyboardLayout`). WebKit has no
- *   keypad Enter, and refuses `"NumpadEnter"` the same way. Firefox reports the keypad's Enter at the left.
+ * - Firefox and WebKit send a character rather than a place, so a code whose character, with Shift held or not, a
+ *   US keyboard has elsewhere fails there with `Unsupported` (`input.keyboardLayout`): `"KeyQ"` on `fr`, which types
+ *   `a`, or `"Digit2"` with Shift on `de`, which types `"`. WebKit has no keypad Enter, and refuses `"NumpadEnter"`
+ *   the same way.
+ * - On Firefox, `"NumpadEnter"` reports its `location` as left (1), as WebDriver's own key table places it.
+ * - Firefox and WebKit can't hold both sides of a modifier: a hold or press of `"ShiftRight"` while `"ShiftLeft"` is
+ *   held, or the reverse, fails with `Unsupported` (`input.modifierSides`) before anything is sent.
+ *
+ * **Example** (Steering with the keys a game reads by place)
+ *
+ * ```ts import.meta.vitest
+ * import { Keyboard, Page } from "@usestrider/browser"
+ * import { Effect, Schema } from "effect"
+ *
+ * const forward = Schema.decodeUnknownSync(Keyboard.Key)("KeyW")
+ *
+ * const steer = Effect.fn("steer")(function*(page: Page.Page) {
+ *   yield* page.keyboard.press(forward)
+ *   yield* page.keyboard.press("ShiftRight")
+ *   yield* page.keyboard.press("Numpad8")
+ * })
+ * ```
  *
  * @stability unstable
  * @category models
@@ -167,6 +201,8 @@ export interface Keyboard {
    *
    * `"Shift"`, `"Control"`, `"Alt"`, and `"Meta"` press the left-hand keys. The numeric keypad types with Num Lock
    * on, so `"Numpad1"` types `1`. A letter's code types what the context's layout puts there.
+   *
+   * @default `"Shift"`, `"Control"`, `"Alt"`, and `"Meta"` press the left-hand keys; the keypad types with Num Lock on
    *
    * **Example** (Closing a menu with Escape)
    *

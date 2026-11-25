@@ -289,7 +289,15 @@ const moveForward = Effect.fn("moveForward")(function*(page: Page.Page) {
 })
 ```
 
-Only Chromium sends the media keys, such as `"MediaPlayPause"`; Firefox and WebKit fail with `Unsupported`.
+Only Chromium sends every code. Firefox and WebKit fail with `Unsupported`, before anything is sent, at:
+
+- the media keys, such as `"MediaPlayPause"`;
+- a code whose character a US keyboard types elsewhere, since they send the character, not the place: `"KeyW"` on
+  a French layout, which types `z`, or `"Digit2"` with Shift on a German one, which types `"`;
+- one side of a modifier while its other side is held, such as `"ShiftRight"` under `"ShiftLeft"`.
+
+WebKit also refuses `"NumpadEnter"`, having only the main Enter, and Firefox reports the keypad's Enter at the left,
+as WebDriver's own key table places it.
 
 Typing uses a US layout unless the context sets another. A character the layout has no key for, such as `ß`, is
 typed as a key of its own with an empty `code`, which a page that reads `code` won't expect. Set the layout the

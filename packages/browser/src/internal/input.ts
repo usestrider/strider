@@ -1,7 +1,9 @@
 /**
  * Each page's input state (CONCEPTS.md §5): the keys and buttons held, and where the
  * pointer is. Every gesture is built from it, and every event carries what is held, so the adapters keep no
- * state of their own: the CDP adapter never sent the buttons held, and WebKit's forgot them between calls.
+ * state of their own: the CDP adapter never sent the buttons held, and WebKit's forgot them between calls. The one
+ * exception is which side of a modifier is held, which an event's flags don't say: stock WebKit's adapter keeps
+ * the modifier keys a page holds by code, since each of Automation's states names the keys held.
  *
  * Modifiers are keys. A gesture with modifiers presses the ones not already held before it and releases them
  * after, in the same dispatch, and also sets the events' flags, which Firefox ignores.
