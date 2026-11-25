@@ -56,7 +56,8 @@ const AdasFirefox = Firefox.layer({
 ## Pages as windows
 
 Firefox renders a background tab about once a second, too seldom for an action to wait on. So each page Strider
-opens is its own window, and the default profile opens popups as windows too.
+opens is its own window, and the default profile opens popups as windows too. When a page closes, Strider keeps its
+window for the next page you create in the same context, since building a window costs Firefox far more than a tab.
 
 A tab of an attached Firefox, or a popup under `LaunchProfile.stock`, is still a tab: call `yield* page.activate`
 before acting on it, as [Attaching](#attaching) shows. [`focus: "emulated"`](/docs/tools/testing#concurrent-pages) isn't available on Firefox, and nor is `bypassCSP`, since Firefox doesn't implement it.

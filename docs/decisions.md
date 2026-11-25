@@ -71,6 +71,12 @@ focus by default as Playwright does, changes what every page sees of focus and v
 `focus: "emulated"` opens the pages the library creates as tabs on Chromium, so a suite that doesn't depend on focus
 takes the fast path by asking for it; the context holds focus emulation for its whole life, which is what keeps a tab
 behind another rendering, and a page-level setting can't turn it off there. Popups follow Chromium's own placement.
+Firefox's pages are windows too, since a background tab there renders about once a second, and building a window is
+the heaviest work its main process does while a new page's first commands wait on it. So a closed page's window is
+kept for its user context's next page, which opens as a tab in front of a blank tab the adapter keeps there and never
+reports; a context keeps at most two idle windows, and they close with it. Rejected on Firefox: a tab per page, which
+leaves the pages behind it barely rendering; one pool of idle windows for every context, which would leave a blank
+window open after its context is removed.
 Rejected: tabs and emulated focus by default; choosing tabs from a focus declaration that can be released later;
 closing a context's pages concurrently, which saved nothing.
 
