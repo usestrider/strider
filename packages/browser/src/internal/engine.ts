@@ -480,6 +480,13 @@ export type Request =
   | { readonly op: "mask"; readonly steps: ReadonlyArray<Step>; readonly color: string; readonly token: string }
   /** Removes the boxes `mask` drew with this token, and no others. */
   | { readonly op: "unmask"; readonly token: string }
+  /**
+   * Adopts a stylesheet of `css` into the document and each of its open shadow roots, for a capture: it stays
+   * until `unstyle` with the same token. A token already styled adds nothing.
+   */
+  | { readonly op: "style"; readonly css: string; readonly token: string }
+  /** Removes the stylesheet `style` adopted with this token, and no other. */
+  | { readonly op: "unstyle"; readonly token: string }
 
 /** One overlay: the caller's HTML, or a chapter's title card, fading out once it is `leaving`. */
 export type OverlayItem =
@@ -555,6 +562,8 @@ export const Response = Schema.Union([
   Schema.TaggedStruct("Masked", { count: Schema.Number }),
   /** A `mask` whose color isn't a CSS color: nothing was drawn. */
   Schema.TaggedStruct("InvalidColor", {}),
+  /** A `style` adopted, or an `unstyle` removed. */
+  Schema.TaggedStruct("Styled", {}),
   Schema.TaggedStruct("Inserted", { inserted: Schema.Boolean }),
   /** The focused element is the `index`th of the document's frames, in the order a `"iframe, frame"` query finds them. */
   Schema.TaggedStruct("InFrame", { index: Schema.Number }),
@@ -994,6 +1003,44 @@ export function engine(render: (root: SnapNode) => string) {
       maskHost = maskRoot = null
     }
     return { _tag: "Masked", count: 0 }
+  }
+
+  /**
+   * Each capture's stylesheet, by its token, and the roots it was adopted into. An adopted stylesheet adds no node,
+   * so the document's HTML and queries never see it.
+   */
+  const captureStyles = new Map<string, { readonly sheet: CSSStyleSheet; readonly roots: Array<DocumentOrShadowRoot> }>()
+  const StyleSheet = CSSStyleSheet
+  const styleDom = {
+    replaceSync: method(CSSStyleSheet.prototype, "replaceSync"),
+    adopted: (root: DocumentOrShadowRoot) =>
+      Object.getOwnPropertyDescriptor(root instanceof ShadowRoot ? ShadowRoot.prototype : Document.prototype, "adoptedStyleSheets")!
+  }
+  const style = (request: Extract<Request, { op: "style" }>): Response => {
+    if (captureStyles.has(request.token)) return { _tag: "Styled" }
+    const sheet = new StyleSheet()
+    styleDom.replaceSync(sheet, request.css)
+    const roots: Array<DocumentOrShadowRoot> = [document]
+    for (const element of elementsUnder(document)) {
+      const shadow = dom.shadowRoot(element)
+      if (shadow !== null) roots.push(shadow)
+    }
+    for (const root of roots) {
+      const adopted = styleDom.adopted(root)
+      call(adopted.set!, root, [[...call(adopted.get!, root, []) as ReadonlyArray<CSSStyleSheet>, sheet]])
+    }
+    captureStyles.set(request.token, { sheet, roots })
+    return { _tag: "Styled" }
+  }
+  const unstyle = (token: string): Response => {
+    const entry = captureStyles.get(token)
+    captureStyles.delete(token)
+    for (const root of entry?.roots ?? []) {
+      const adopted = styleDom.adopted(root)
+      const sheets = call(adopted.get!, root, []) as ReadonlyArray<CSSStyleSheet>
+      call(adopted.set!, root, [sheets.filter((sheet) => sheet !== entry!.sheet)])
+    }
+    return { _tag: "Styled" }
   }
 
   /**
@@ -4985,6 +5032,10 @@ export function engine(render: (root: SnapNode) => string) {
           return JSON.stringify(mask(request))
         case "unmask":
           return JSON.stringify(unmask(request.token))
+        case "style":
+          return JSON.stringify(style(request))
+        case "unstyle":
+          return JSON.stringify(unstyle(request.token))
         case "role":
           return JSON.stringify(
             {

@@ -235,7 +235,8 @@ export type ScreenshotOptions = ScreenshotFormat & {
 }
 
 /**
- * Settings for `screenshot` on a page you control: `ScreenshotOptions`, and elements to hide behind a box.
+ * Settings for `screenshot` on a page you control: `ScreenshotOptions`, elements to hide behind a box, whether
+ * the text caret shows, and CSS applied for the capture.
  *
  * **Details**
  *
@@ -244,12 +245,20 @@ export type ScreenshotOptions = ScreenshotFormat & {
  * matches nothing hides nothing and isn't an error. A `maskColor` that isn't a CSS color fails the capture with
  * `InvalidInput` before any box is drawn.
  *
+ * A capture hides the blinking caret of a focused field unless `caret` is `"initial"`, so two captures of the
+ * same page give the same image. `style` is a stylesheet applied to every frame's document and each open shadow
+ * root for the capture, before the element's box and the masks are measured: use it to hide what changes from
+ * run to run, such as a clock. CSS it can't parse is dropped, as the browser drops it, and `@import` rules are
+ * ignored.
+ *
  * **Gotchas**
  *
- * The boxes are drawn into the page for the capture, so a headed browser shows them for that long, and the page's
- * scripts can see the change. They are removed once it ends, however it ends, from each frame that answers within
- * 5 seconds: a frame that doesn't keeps its boxes, and the capture still returns its image or its error. They
- * don't cover what the browser draws above the page, such as an open `<dialog>` or popover.
+ * The boxes and the stylesheet are put into the page for the capture, so a headed browser shows them for that
+ * long, and the page's scripts can see the change: the stylesheet is in `adoptedStyleSheets`. They are removed
+ * once it ends, however it ends, from each frame that answers within 5 seconds: a frame that doesn't keeps them,
+ * and the capture still returns its image or its error. They don't cover what the browser draws above the page,
+ * such as an open `<dialog>` or popover. A `ReadonlyPage`'s capture hides the caret the same way, since it is the
+ * same capture, but only a page you control can show it with `caret: "initial"`.
  *
  * **Example** (Hiding every avatar in black)
  *
@@ -284,6 +293,19 @@ export type ControlScreenshotOptions = ScreenshotOptions & {
    * @default "#FF00FF"
    */
   readonly maskColor?: string | undefined
+  /**
+   * Whether a focused field's text caret shows: `"hide"` makes it transparent for the capture, and `"initial"`
+   * leaves it as the page draws it. Anything else fails the capture with `InvalidInput`.
+   *
+   * @default "hide"
+   */
+  readonly caret?: "hide" | "initial" | undefined
+  /**
+   * CSS applied to every frame and open shadow root of the page for the length of the capture.
+   *
+   * @default undefined
+   */
+  readonly style?: string | undefined
 }
 
 /**

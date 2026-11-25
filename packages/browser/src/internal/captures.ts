@@ -148,10 +148,40 @@ const drawMasks = (
     }), { discard: true })
 
 /**
- * Removes a capture's masks from every document it may have drawn them in; a document that went took them with
- * it. One that doesn't answer within 5 seconds keeps its boxes, and the capture's own result stays as it is.
+ * Adopts a stylesheet of `css` into every document of the page and each of its open shadow roots, adding each
+ * document to `documents` before the request is sent, so a capture cut short before the reply still removes it. A
+ * document that went before it answered took nothing with it.
  */
-const removeMasks = (
+const applyStyle = (
+  runtime: Runtime.Runtime,
+  page: Model.PageEntry,
+  css: string,
+  token: string,
+  documents: Set<Target.DocumentId>,
+  operation: string,
+  record: Operation.Record
+): Effect.Effect<void, Page.PageError | Target.TargetGone | Deadline.Timeout> =>
+  Effect.gen(function*() {
+    const state = yield* page.state.get
+    const all = [
+      ...(state.status._tag === "Open" ? [state.status.document.id] : []),
+      ...state.frames.flatMap((frame) => Option.toArray(frame.document))
+    ]
+    yield* Effect.forEach(all, (document) =>
+      Effect.gen(function*() {
+        documents.add(document)
+        const answer = yield* Runtime.sendToDocument(runtime, page, document, { op: "style", css, token }, record.id)
+          .pipe(Effect.mapError(failed(operation, record)))
+        if (Option.isNone(answer) || answer.value._tag === "Styled") return
+        return yield* Effect.die(new Error(`Page.screenshot: the engine answered ${answer.value._tag} to a style`))
+      }), { discard: true, concurrency: "unbounded" })
+  })
+
+/**
+ * Removes a capture's masks and stylesheet from every document it may have put them in; a document that went took
+ * them with it. One that doesn't answer within 5 seconds keeps them, and the capture's own result stays as it is.
+ */
+const removeDrawings = (
   runtime: Runtime.Runtime,
   page: Model.PageEntry,
   token: string,
@@ -162,6 +192,7 @@ const removeMasks = (
     documents,
     (document) =>
       Runtime.sendToDocument(runtime, page, document, { op: "unmask", token }, id).pipe(
+        Effect.andThen(Runtime.sendToDocument(runtime, page, document, { op: "unstyle", token }, id)),
         // Interruptible inside the release, so the bound can end it
         Effect.interruptible,
         BrowserClock.timeoutOption(5000),
@@ -173,8 +204,11 @@ const removeMasks = (
     Operation.detached
   )
 
-/** Distinguishes each capture's masks from another's drawn in the same document. */
-let masksDrawn = 0
+/** Distinguishes each capture's masks and stylesheet from another's in the same document. */
+let capturesDrawn = 0
+
+/** Hides the caret in every element, over any `caret-color` the page sets. */
+const hideCaret = "*, *::before, *::after { caret-color: transparent !important; }"
 
 /** `page.screenshot`. */
 export const screenshot = (
@@ -197,8 +231,13 @@ export const screenshot = (
         invalid(operation, id, "quality", "a JPEG quality from 0 to 100", `${quality} isn't one`)
       )
     }
-    const capture = Effect.gen(function*() {
-      let clip = Option.none<Box>()
+    const caret = options?.caret ?? "hide"
+    if (caret !== "hide" && caret !== "initial") {
+      return yield* Effect.fail(invalid(operation, id, "caret", `"hide" or "initial"`, `${String(caret)} isn't one`))
+    }
+    const css = [caret === "hide" ? hideCaret : "", options?.style ?? ""].filter((each) => each !== "").join("\n")
+    const masks = options?.mask ?? []
+    const areaClip = Effect.gen(function*() {
       if (typeof area !== "string" && area.clip !== undefined) {
         const { height, width, x, y } = area.clip
         if (!(width > 0 && height > 0 && Number.isFinite(x) && Number.isFinite(y))) {
@@ -206,7 +245,7 @@ export const screenshot = (
             invalid(operation, id, "area", "a clip with a positive width and height", `${width}×${height} isn't one`)
           )
         }
-        clip = Option.some({ x, y, width, height })
+        return Option.some<Box>({ x, y, width, height })
       }
       if (typeof area !== "string" && area.element !== undefined) {
         const locator = area.element
@@ -222,20 +261,27 @@ export const screenshot = (
             invalid(operation, id, "area", "an element in a frame that is there", "a frame on its way went")
           )
         }
-        clip = box
+        return box
       }
-      const masks = options?.mask ?? []
-      if (masks.length === 0) return yield* shoot(clip)
-      const token = `${id}:${++masksDrawn}`
-      return yield* Effect.acquireUseRelease(
-        Effect.sync(() => new Set<Target.DocumentId>()),
-        (documents) =>
-          drawMasks(runtime, page, masks, options?.maskColor ?? "#FF00FF", token, documents, operation, record).pipe(
-            Effect.andThen(shoot(clip))
-          ),
-        (documents) => removeMasks(runtime, page, token, documents, id)
-      )
+      return Option.none<Box>()
     })
+    const capture = masks.length === 0 && css === ""
+      ? Effect.flatMap(areaClip, (clip) => shoot(clip))
+      : Effect.suspend(() => {
+        const token = `${id}:${++capturesDrawn}`
+        return Effect.acquireUseRelease(
+          Effect.sync(() => new Set<Target.DocumentId>()),
+          (documents) =>
+            Effect.gen(function*() {
+              // The style first, since it can move what the element's box and the masks are measured from
+              if (css !== "") yield* applyStyle(runtime, page, css, token, documents, operation, record)
+              const clip = yield* areaClip
+              yield* drawMasks(runtime, page, masks, options?.maskColor ?? "#FF00FF", token, documents, operation, record)
+              return yield* shoot(clip)
+            }),
+          (documents) => removeDrawings(runtime, page, token, documents, id)
+        )
+      })
     const shoot = Effect.fnUntraced(function*(clip: Option.Option<Box>) {
       const captureOptions: Adapter.ScreenshotOptions = {
         format,
