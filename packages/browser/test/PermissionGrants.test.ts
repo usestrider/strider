@@ -141,3 +141,35 @@ it.effect("releases the permission permit when its scope closes during a send", 
       assert.strictEqual(settings.size, 0, "replay must not restore the closed declaration")
     }).pipe(Effect.provide(layer))
   }))
+
+it.effect("leaves no permission when its scope is already closed", () =>
+  Effect.gen(function*() {
+    const clock = yield* Clock.clockWith(Effect.succeed)
+    const settings = new Map<string, string>()
+    const layer = BrowserImpl.layer((sink) =>
+      Effect.map(
+        Fake.connect([], {
+          info: new Browser.Info(Fake.info),
+          capabilities: new Browser.CapabilitySet({ entries: Fake.capabilities })
+        })(sink),
+        (fake) => ({
+          ...fake,
+          grantPermissions: Effect.fnUntraced(function*(_context, _origin, names, setting) {
+            for (const name of names) settings.set(name, setting)
+          }),
+          resetPermissions: () => Effect.sync(() => settings.clear())
+        })
+      )
+    ).pipe(Layer.provideMerge(Layer.succeed(BrowserClock.CurrentClock, BrowserClock.fromClock(clock))))
+    yield* Effect.gen(function*() {
+      const context = yield* Browser.newContext()
+      const owner = yield* Scope.make()
+      yield* Scope.close(owner, Exit.void)
+      const registration = yield* context.deny(["notifications"]).pipe(Scope.provide(owner))
+      yield* registration.remove
+      assert.strictEqual(settings.size, 0, "a closed scope must leave no permission behind")
+      const next = yield* context.grant([])
+      yield* next.remove
+      assert.strictEqual(settings.size, 0, "replay must not restore the closed declaration")
+    }).pipe(Effect.provide(layer))
+  }))
