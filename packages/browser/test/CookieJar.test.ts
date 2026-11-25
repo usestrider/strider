@@ -167,6 +167,15 @@ describe("CookieJar.remove", () => {
 })
 
 describe("CookieJar filter isolation", () => {
+  it.effect("removes cookies at the default test clock time", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { cookies } = yield* Browser.newContext()
+      yield* cookies.set({ name: "session", value: "1", scope: { url: "https://example.test/" } })
+      assert.strictEqual((yield* cookies.list).length, 1)
+      yield* cookies.remove({ name: "session" })
+      assert.deepStrictEqual(yield* cookies.list, [])
+    })).pipe(Effect.provide(Browser.layerTest(""))))
+
   it.effect("preserves the caller's pattern position", () =>
     Effect.gen(function*() {
       const pattern = /session/g
