@@ -3971,6 +3971,15 @@ export const contents = (
               "Unpartitioned",
               "unpartitioned"
             ]])
+            // Setting an unspecified ancestor bit uses false; removing that key must preserve the true partition.
+            yield* jar.set({
+              ...chip,
+              value: "cross-site",
+              partitionKey: { ...news, crossSiteAncestor: Option.some(true) }
+            })
+            assert.strictEqual((yield* jar.list).filter((cookie) => cookie.name === "chip").length, 2)
+            yield* jar.remove({ name: "chip", partitionKey: news })
+            assert.strictEqual((yield* jar.list).filter((cookie) => cookie.name === "chip").length, 2)
           }))
         }), timeout)
 

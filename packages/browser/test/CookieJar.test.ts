@@ -1,6 +1,7 @@
 /** Which cookies `CookieJar.listFor` says a request to a URL sends, and which `CookieJar.remove` removes. */
 import { assert, describe, it } from "@effect/vitest"
 import { Browser, CookieJar, Url } from "@usestrider/browser"
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 
@@ -155,4 +156,76 @@ describe("CookieJar.remove", () => {
     Effect.gen(function*() {
       assert.deepStrictEqual(yield* leftAfter({}), [])
     }))
+})
+
+describe("CookieJar filter isolation", () => {
+  it.effect("preserves the caller's pattern position", () =>
+    Effect.gen(function*() {
+      const pattern = /session/g
+      pattern.lastIndex = 3
+      yield* leftAfter({ name: pattern })
+      assert.strictEqual(pattern.lastIndex, 3)
+    }))
+
+  it.effect("keeps cookies in partitions with different ancestor bits", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { cookies } = yield* Browser.newContext()
+      for (const ancestor of [false, true]) {
+        yield* cookies.set({
+          name: "chip",
+          value: "1",
+          scope: { url: "https://widget.test/" },
+          partitionKey: {
+            _tag: "Partitioned",
+            topLevelSite: Url.Site.make("https://news.test"),
+            crossSiteAncestor: Option.some(ancestor)
+          }
+        })
+      }
+      assert.strictEqual((yield* cookies.list).length, 2)
+      yield* cookies.remove({
+        partitionKey: {
+          _tag: "Partitioned",
+          topLevelSite: Url.Site.make("https://news.test"),
+          crossSiteAncestor: Option.some(false)
+        }
+      })
+      assert.strictEqual((yield* cookies.list).length, 1)
+    })).pipe(Effect.provide(Browser.layerTest(""))))
+
+  it.effect("uses the same absent ancestor bit for setting and removing a partition", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { cookies } = yield* Browser.newContext()
+      yield* cookies.set({
+        name: "cross_site",
+        value: "1",
+        scope: { url: "https://widget.test/" },
+        partitionKey: {
+          _tag: "Partitioned",
+          topLevelSite: Url.Site.make("https://news.test"),
+          crossSiteAncestor: Option.some(true)
+        }
+      })
+      yield* cookies.remove({
+        partitionKey: {
+          _tag: "Partitioned",
+          topLevelSite: Url.Site.make("https://news.test"),
+          crossSiteAncestor: Option.none()
+        }
+      })
+      assert.strictEqual((yield* cookies.list).length, 1)
+    })).pipe(Effect.provide(Browser.layerTest(""))))
+
+  it.effect("uses the test clock for cookie expiry", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { cookies } = yield* Browser.newContext()
+      const now = yield* Clock.currentTimeMillis
+      yield* cookies.set({
+        name: "future",
+        value: "1",
+        scope: { url: "https://example.test/" },
+        expires: new Date(now + 60_000)
+      })
+      assert.strictEqual((yield* cookies.list).length, 1)
+    })).pipe(Effect.provide(Browser.layerTest(""))))
 })
