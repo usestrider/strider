@@ -57,9 +57,7 @@ export const register = (handlers: Kit.Handlers<Event>) =>
     .on(BrowsingContext.contextDestroyed, (params, { state }) => {
       const windows = Windows.of(state)
       if (windows.blanks.has(params.context)) {
-        windows.blanks.delete(params.context)
-        const at = windows.idle.indexOf(params.context)
-        if (at !== -1) windows.idle.splice(at, 1)
+        Windows.ended(state, params.context)
         return
       }
       const navigable = state.navigables.get(params.context)
@@ -67,10 +65,13 @@ export const register = (handlers: Kit.Handlers<Event>) =>
       if (windows.pages.has(params.context)) {
         const blank = windows.pages.get(params.context)
         windows.pages.delete(params.context)
-        // Its window, kept by its blank tab, is idle
+        windows.added.delete(params.context)
+        // Its window, kept by its blank tab, is idle; its context keeps at most `Windows.maxIdle`
         if (blank !== undefined && windows.blanks.has(blank)) {
-          windows.idle.push(blank)
-          state.buffer.later(trimIdle(state))
+          const extra = Windows.idle(state, blank)
+          if (extra.length > 0) {
+            state.buffer.later(Effect.forEach(extra, (tab) => Windows.close(state, tab), { discard: true }))
+          }
         }
       }
       removeNavigable(
@@ -384,48 +385,34 @@ export const removeUserContext = Effect.fnUntraced(function*(state: State, id: U
   ))
 })
 
-/** Closes idle windows beyond `Windows.maxIdle`, oldest first, by closing their blank tab, the window's last. */
-const trimIdle = (state: State) =>
-  Effect.suspend(() => {
-    const windows = Windows.of(state)
-    const extra = windows.idle.splice(0, Math.max(0, windows.idle.length - Windows.maxIdle))
-    return Effect.forEach(
-      extra,
-      (blank) =>
-        Effect.ignore(state.send(BrowsingContext.close({ context: blank as BrowsingContext.BrowsingContext }))),
-      { discard: true }
-    )
-  })
-
 /**
- * Opens a blank tab, in the default user context, in the window of `page`, so the window outlives the page. Contexts
- * held back while it was unanswered are folded once it answers, except the blank tab itself.
+ * Opens a blank tab in the window of `page`, in its user context, so the window outlives the page and closes with the
+ * context. Contexts held back while it was unanswered are folded once it answers, except the blank tab itself.
  */
-const openBlank = (state: State, page: BrowsingContext.BrowsingContext) =>
+const openBlank = (state: State, page: BrowsingContext.BrowsingContext, userContext: BrowserBidi.UserContext) =>
   Effect.suspend(() => {
     const windows = Windows.of(state)
-    windows.pending++
-    return state.send(
-      BrowsingContext.create({
-        type: "tab",
-        referenceContext: page,
-        background: true,
-        // Firefox puts a tab in its reference context's user context unless told otherwise
-        userContext: "default" as BrowserBidi.UserContext
-      })
-    ).pipe(
-      Effect.tap((created) => Effect.sync(() => windows.blanks.add(created.context))),
-      Effect.ensuring(Effect.sync(() => {
-        windows.pending--
-        if (windows.pending > 0) return
-        const parked = windows.parked.splice(0)
-        for (const info of parked) {
-          if (windows.blanks.has(info.context)) continue
-          const navigable = addNavigable(state, info, state.adopting)
-          if (navigable !== undefined && navigable.parent === undefined) state.buffer.later(applyCache(state))
-        }
-      }))
-    )
+    windows.pending.set(userContext, (windows.pending.get(userContext) ?? 0) + 1)
+    return state.send(BrowsingContext.create({ type: "tab", referenceContext: page, background: true, userContext }))
+      .pipe(
+        Effect.tap((created) => Effect.sync(() => windows.blanks.set(created.context, userContext))),
+        Effect.ensuring(Effect.sync(() => {
+          const left = (windows.pending.get(userContext) ?? 1) - 1
+          if (left > 0) {
+            windows.pending.set(userContext, left)
+            return
+          }
+          windows.pending.delete(userContext)
+          // In the order they came
+          const parked = windows.parked.filter((info) => info.userContext === userContext)
+          windows.parked.splice(0, windows.parked.length, ...windows.parked.filter((info) => !parked.includes(info)))
+          for (const info of parked) {
+            if (windows.blanks.has(info.context)) continue
+            const navigable = addNavigable(state, info, state.adopting)
+            if (navigable !== undefined && navigable.parent === undefined) state.buffer.later(applyCache(state))
+          }
+        }))
+      )
   })
 
 export const createPage = Effect.fnUntraced(function*(state: State, id: UserContext.Id) {
@@ -434,7 +421,7 @@ export const createPage = Effect.fnUntraced(function*(state: State, id: UserCont
   // second, too seldom to act on, and a window keeps rendering whichever page came last (Q71). An idle window,
   // whose page closed, is reused: the page opens as a tab in front of its blank tab, alone there but for it
   const windows = Windows.of(state)
-  const blank = windows.idle.pop()
+  const blank = Windows.take(state, context.bidi)
   const created = yield* Kit.protocol(
     state.send(
       blank === undefined
@@ -450,6 +437,9 @@ export const createPage = Effect.fnUntraced(function*(state: State, id: UserCont
   windows.pages.set(created.context, blank)
   // The context was announced before the reply; it is folded once this returns
   yield* state.root().drainObserved
+  // Held back as a possible blank tab of a close under way, it is the page's: the reply says so
+  const at = windows.parked.findIndex((info) => info.context === created.context)
+  if (at !== -1) addNavigable(state, windows.parked.splice(at, 1)[0]!, state.adopting)
   const navigable = state.navigables.get(created.context)
   if (navigable === undefined) {
     return yield* Effect.fail(Kit.gone({ _tag: "Browser" }, new L1Target.Vanished({})))
@@ -471,8 +461,13 @@ export const closePage = Effect.fnUntraced(
     // The reply may wait on a beforeunload prompt, which the context's end reports
     state.buffer.start(
       (keep
-        ? openBlank(state, navigable.bidi).pipe(
-          Effect.tap((created) => Effect.sync(() => windows.pages.set(navigable.bidi, created.context))),
+        ? openBlank(state, navigable.bidi, navigable.context.bidi).pipe(
+          Effect.tap((created) =>
+            Effect.sync(() => {
+              windows.pages.set(navigable.bidi, created.context)
+              windows.added.add(navigable.bidi)
+            })
+          ),
           Effect.ignore
         )
         : Effect.void).pipe(

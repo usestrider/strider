@@ -27,6 +27,7 @@ import {
   type RequestEntry,
   type State
 } from "./state.ts"
+import * as Windows from "./windows.ts"
 
 // ── Paused requests ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -223,6 +224,9 @@ export const register = (handlers: Kit.Handlers<Event>) =>
         if (obligation.beforeUnload && !params.accepted) {
           const navigable = navigableOf(state, params.context)
           if (navigable !== undefined) navigable.page.closeRequested = false
+          // The blank tab the close added to keep its window goes again, leaving the page alone there
+          const blank = Windows.refused(state, params.context)
+          if (blank !== undefined) state.buffer.later(Windows.close(state, blank))
         }
         state.buffer.emit({
           _tag: "PromptClosed",
