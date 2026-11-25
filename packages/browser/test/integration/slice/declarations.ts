@@ -24,6 +24,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Headers from "effect/http/Headers"
+import * as HttpBody from "effect/http/HttpBody"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type * as Layer from "effect/Layer"
@@ -693,6 +694,36 @@ export const declarations = (
             )
             assert.deepStrictEqual(seen, [["PUT", "1", undefined, Option.some("changed")]])
             assert.deepStrictEqual(result, ["PUT", "1", null, "changed"])
+          }))
+        }), timeout)
+
+      it.effect("removes a body supplied by an earlier route before continuing", () =>
+        Effect.gen(function*() {
+          const { origin } = yield* site
+          yield* Effect.scoped(Effect.gen(function*() {
+            const page = yield* SharedContext.newPage
+            const bodies: Array<string> = []
+            yield* page.route(`${origin}/echo*`, (intercepted) =>
+              Effect.gen(function*() {
+                const body = yield* intercepted.requestBody
+                bodies.push(Option.match(body, {
+                  onNone: () =>
+                    "",
+                  onSome: (bytes) =>
+                    new TextDecoder().decode(bytes)
+                }))
+                return yield* Route.continue
+              }))
+            yield* page.route(`${origin}/echo*`, () =>
+              Route.fallthroughWith(HttpClientRequest.setBody(HttpBody.empty)))
+            yield* page.route(`${origin}/echo*`, () =>
+              Route.fallthroughWith(HttpClientRequest.bodyText("replacement")))
+            const result = yield* run(
+              page,
+              origin,
+              `return fetch('/echo', { method: 'POST', body: 'original' }).then((r) => r.json()).then((r) => r.body)`
+            )
+            assert.deepStrictEqual([bodies, result], [[""], ""])
           }))
         }), timeout)
 

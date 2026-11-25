@@ -26,6 +26,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Zip from "effect/encoding/Zip"
 import * as Fiber from "effect/Fiber"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
@@ -722,6 +723,18 @@ export const recordings = (name: string, backend: Layer.Layer<Browser.Browser, u
               })
               // The latest entry with the request's body answers it; none matches the last, which is aborted
               assert.deepStrictEqual(answers, ["recorded hats", "recorded shoes", "failed"])
+              yield* page.route("**/*json", () =>
+                Route.fallthroughWith((request) =>
+                  request.pipe(
+                    HttpClientRequest.setUrl(`${served.origin}/echo`),
+                    HttpClientRequest.setMethod("POST"),
+                    HttpClientRequest.bodyText("shoes")
+                  )
+                ))
+              const changed = yield* page.evaluateInMainWorld(() =>
+                fetch("/json", { method: "PUT", body: "hats" }).then((response) => response.text(), () => "failed")
+              )
+              assert.strictEqual(changed, "recorded shoes")
               // WebKit doesn't follow a redirect a route fulfills (QUIRKS.md, Q90)
               if (name !== "WebKit") {
                 const redirected = yield* page.evaluateInMainWorld(() =>
