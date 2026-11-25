@@ -276,7 +276,16 @@ export const screenshot = (
               // The style first, since it can move what the element's box and the masks are measured from
               if (css !== "") yield* applyStyle(runtime, page, css, token, documents, operation, record)
               const clip = yield* areaClip
-              yield* drawMasks(runtime, page, masks, options?.maskColor ?? "#FF00FF", token, documents, operation, record)
+              yield* drawMasks(
+                runtime,
+                page,
+                masks,
+                options?.maskColor ?? "#FF00FF",
+                token,
+                documents,
+                operation,
+                record
+              )
               return yield* shoot(clip)
             }),
           (documents) => removeDrawings(runtime, page, token, documents, id)

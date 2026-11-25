@@ -3784,7 +3784,9 @@ export const contents = (
               { waitUntil: "load" }
             )
             yield* page.locator("#field").focus()
-            const ratio = yield* page.evaluateInMainWorld(() => devicePixelRatio)
+            const ratio = yield* page.evaluateInMainWorld(() =>
+              devicePixelRatio
+            )
             // Each capture of the field's box, a blink apart, so a caret that shows in any of them is seen
             for (let i = 0; i < 6; i++) {
               const png = yield* page.screenshot()
@@ -3928,7 +3930,9 @@ export const contents = (
               })
               assert.deepStrictEqual(yield* listed, ["plain"])
               yield* page.goto(`${origin}/app/page`)
-              const token = (yield* jar.list).find((cookie) => cookie.name === "token")
+              const token = (yield* jar.list).find((cookie) =>
+                cookie.name === "token"
+              )
               assert.isDefined(token)
               assert.strictEqual(Redacted.value(token.value), "secret")
               assert.strictEqual(token.path, "/app")

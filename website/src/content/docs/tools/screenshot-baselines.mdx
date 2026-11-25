@@ -77,6 +77,8 @@ in a directory for the test file, attaching each to the test:
 | `InvalidBaseline` | none                                                                |
 | `InvalidName`     | none                                                                |
 
+A capture hides a focused field's blinking caret, so the caret never makes two captures differ.
+
 Two identical captures mean only that two screenshots agreed, not that the page has stopped rendering. A page whose
 captures keep changing fails at the operation's deadline. A baseline that isn't a PNG, or whose chunks' checksums
 don't match, is invalid.

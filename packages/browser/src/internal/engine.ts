@@ -1009,12 +1009,18 @@ export function engine(render: (root: SnapNode) => string) {
    * Each capture's stylesheet, by its token, and the roots it was adopted into. An adopted stylesheet adds no node,
    * so the document's HTML and queries never see it.
    */
-  const captureStyles = new Map<string, { readonly sheet: CSSStyleSheet; readonly roots: Array<DocumentOrShadowRoot> }>()
+  const captureStyles = new Map<
+    string,
+    { readonly sheet: CSSStyleSheet; readonly roots: Array<DocumentOrShadowRoot> }
+  >()
   const StyleSheet = CSSStyleSheet
   const styleDom = {
     replaceSync: method(CSSStyleSheet.prototype, "replaceSync"),
     adopted: (root: DocumentOrShadowRoot) =>
-      Object.getOwnPropertyDescriptor(root instanceof ShadowRoot ? ShadowRoot.prototype : Document.prototype, "adoptedStyleSheets")!
+      Object.getOwnPropertyDescriptor(
+        root instanceof ShadowRoot ? ShadowRoot.prototype : Document.prototype,
+        "adoptedStyleSheets"
+      )!
   }
   const style = (request: Extract<Request, { op: "style" }>): Response => {
     if (captureStyles.has(request.token)) return { _tag: "Styled" }

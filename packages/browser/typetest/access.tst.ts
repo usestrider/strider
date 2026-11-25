@@ -54,6 +54,9 @@ describe("access is typed", () => {
     expect(page.screenshot({ mask: [reader.locator("#card")] })).type.not.toRaiseError()
     expect(reader.screenshot({ mask: [reader.locator("#card")] })).type.toRaiseError()
     expect(reader.screenshot({ maskColor: "black" })).type.toRaiseError()
+    expect(page.screenshot({ caret: "initial", style: "#clock { visibility: hidden }" })).type.not.toRaiseError()
+    expect(reader.screenshot({ caret: "initial" })).type.toRaiseError()
+    expect(reader.screenshot({ style: "#clock { visibility: hidden }" })).type.toRaiseError()
     expect(reader.screenshot({ area: "fullPage" })).type.not.toRaiseError()
   })
 

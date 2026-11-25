@@ -1949,3 +1949,14 @@ which comes from Chromium's `Browser.grantPermissions` and lands differently on 
 no one stated over a set of names that differs by browser; and a `prompt` declaration of its own, left out to keep the
 API small: `prompt` is what a permission is when no declaration in force covers it, so returning to it is removing
 declarations, not adding one.
+
+## A capture hides the caret by default
+
+`Page.screenshot` hides a focused field's text caret unless `caret` is `"initial"`, by adopting a stylesheet that makes
+`caret-color` transparent into every frame's document and open shadow root for the length of the capture, with the
+caller's `style` in the same stylesheet. Chromium paints the blinking caret into a capture, so without it two captures
+of the same page differ by whether the caret was on, and a screenshot baseline fails by timing. A `ReadonlyPage`'s
+capture is the same operation, since a subtype never changes what an inherited member does, so it hides the caret
+too, though only control can opt out. Rejected: showing the caret by default, as Puppeteer does, which leaves every
+capture of a focused field to chance on Chromium; and a `<style>` element per document, which `readHtml` and queries
+would see, where an adopted stylesheet adds no node.
